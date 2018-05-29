@@ -1,0 +1,66 @@
+- hosts: all
+  gather_facts: False
+
+  tasks:
+  - name: install python 2
+    become: True
+    raw: test -e /usr/bin/python || (apt -y update && apt install -y python-minimal)
+
+- name: ixypy development Environment
+  hosts: all
+  gather_facts: True
+  tasks:
+    - name: Update and Upgrade
+      become: True
+      apt:
+        upgrade: yes
+        update_cache: yes
+        cache_valid_time: 86400
+
+    - name: Add additional repositories
+      become: True
+      apt_repository:
+        repo: ppa:jonathonf/python-3.6
+        state: present
+
+    - name: Install tools
+      become: True
+      apt:
+        name: "{{ item }}"
+        update_cache: True
+      with_items:
+        - make
+        - python3.6
+        - python3.6-dev
+        - python3.6-venv
+        - python3.6-gdbm
+        - git
+        - build-essential
+        - cmake
+
+    - name: Install pypy3
+      become: True
+      shell: |
+        wget -q -P /tmp \
+          https://bitbucket.org/pypy/pypy/downloads/pypy3-v6.0.0-linux64.tar.bz2
+        sudo tar -x -C /opt -f /tmp/pypy3-v6.0.0-linux64.tar.bz2
+        rm /tmp/pypy3-v6.0.0-linux64.tar.bz2
+        sudo mv /opt/pypy3-v6.0.0-linux64 /opt/pypy3
+        sudo ln -fs /opt/pypy3/bin/pypy3 /usr/bin/pypy3
+
+    - name: Install pip3.6
+      become: True
+      shell: |
+        wget https://bootstrap.pypa.io/get-pip.py
+        python3.6 get-pip.py
+
+    - name: Install python dependencies
+      become: True
+      pip:
+        name: "{{ item }}"
+        extra_args: -i https://pypi.python.org/simple
+        executable: pip3
+      with_items:
+        - tox
+
+# https://bitbucket.org/pypy/pypy/downloads/pypy3-v6.0.0-linux32.tar.bz2
