@@ -29,6 +29,7 @@
         name: "{{ item }}"
         update_cache: True
       with_items:
+        - tree
         - make
         - python3.6
         - python3.6-dev
@@ -41,8 +42,7 @@
     - name: Install pypy3
       become: True
       shell: |
-        wget -q -P /tmp \
-          https://bitbucket.org/pypy/pypy/downloads/pypy3-v6.0.0-linux64.tar.bz2
+        wget -q -P /tmp https://bitbucket.org/pypy/pypy/downloads/pypy3-v6.0.0-linux64.tar.bz2
         sudo tar -x -C /opt -f /tmp/pypy3-v6.0.0-linux64.tar.bz2
         rm /tmp/pypy3-v6.0.0-linux64.tar.bz2
         sudo mv /opt/pypy3-v6.0.0-linux64 /opt/pypy3
