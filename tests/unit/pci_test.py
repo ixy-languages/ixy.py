@@ -1,10 +1,16 @@
-from struct import pack, calcsize
+import os
+
+from unittest.mock import MagicMock
+
+
+from struct import pack
 from collections import namedtuple
 
 import pytest
 from pytest import raises
 
-from ixypy.pci import PCIAddress, PCIConfigurationReader, InvalidPCIAddressException
+from ixypy.pci import PCIAddress, PCIConfigurationReader, InvalidPCIAddressException, \
+    PCIDeviceController, PCIDevice
 
 
 class TestPCIAddress(object):
@@ -47,15 +53,72 @@ class TestPCIAddress(object):
 
 
 class TestPCIConfigurationReader(object):
-    def test_fixture(self, pci_configuration):
-        config_reader = PCIConfigurationReader(pci_configuration.config_path)
-        config = config_reader.read()
-        assert config.__dict__ == pci_configuration.config_dict
+    def test_fixture(self, pci_device):
+        config_reader = PCIConfigurationReader(pci_device.config_path)
 
-    def test_real_config(self):
-        config_reader = PCIConfigurationReader('/sys/bus/pci/devices/0000:00:09.0/config')
         config = config_reader.read()
-        print('{:02x}'.format(config.class_code))
+
+        assert config.__dict__ == pci_device.config_dict
+
+
+class TestPCIController(object):
+    def test_device_config(self):
+        device = PCIDeviceController('/sys/bus/pci/devices/0000:00:15.0')
+
+        assert device.config_path() == '/sys/bus/pci/devices/0000:00:15.0/config'
+
+    def test_has_driver(self, pci_device):
+        pci_controller = PCIDeviceController(pci_device.device_path)
+
+        assert pci_controller.has_driver()
+
+    def test_has_no_driver(self, pci_device):
+        os.remove('{}/driver/unbind'.format(pci_device.device_path))
+        pci_controller = PCIDeviceController(pci_device.device_path)
+
+        assert pci_controller.has_driver() is False
+
+    def test_unbind_driver(self, pci_device):
+        pci_controller = PCIDeviceController(pci_device.device_path)
+        pci_address = MagicMock()
+        pci_address.__str__.return_value = 'my_device'
+
+        pci_controller.unbind_driver(pci_address)
+
+        assert open('{}/driver/unbind'.format(pci_device.device_path)).read() == 'my_device'
+
+    def test_map_resource(self, pci_device):
+        # GIVEN
+        pci_controller = PCIDeviceController(pci_device.device_path)
+        to_resource = b'Hello resource'
+
+        # WHEN writing to the mapped resource
+        pci_controller.map_resource()[:len(to_resource)] = to_resource
+
+        # THEN the content should be in the mapped file
+        with open('{}/resource0'.format(pci_device.device_path), 'rb') as resource:
+            assert resource.read()[:len(to_resource)] == to_resource
+
+    def test_enable_dma(self, pci_device):
+        pci_controller = PCIDeviceController(pci_device.device_path)
+
+        pci_controller.enable_dma()
+
+        with open(pci_device.config_path, 'rb') as config:
+            config.seek(4)
+            command_reg = bytearray(config.read(2))
+            assert command_reg[0] & (1 << 2)
+
+
+class TestPCIDevice(object):
+    @staticmethod
+    def get_pci_device(address):
+        return PCIDevice(PCIAddress.from_address_string('0000:00:15.0'))
+
+    def test_device_path(self):
+        device = self.get_pci_device('0000:00:15.0')
+
+        assert device.path() == '/sys/bus/pci/devices/0000:00:15.0'
 
 
 def pack_config(fmt, config):
@@ -65,7 +128,7 @@ def pack_config(fmt, config):
         config['control_register'],
         config['status_register'],
         config['revision_id'],
-        *config['class_code'].to_bytes(3, 'little'),
+        *config['class_code'].to_bytes(3, 'big'),
         config['cache_line_size'],
         config['latency_timer'],
         config['header_type'],
@@ -84,13 +147,16 @@ def pack_config(fmt, config):
 
 
 @pytest.fixture()
-def pci_configuration(tmpdir):
+def pci_device(tmpdir):
     pci_config = tmpdir.join('config')
+    tmpdir.mkdir('driver').join('unbind').write('')
+    with tmpdir.join('resource0').open(mode='wb') as resource:
+        resource.write(bytes([0x0]*32))
     fmt = '< 4H 7B x 7I 2H I B 7x 4B'
     config = {
         'vendor_id': 0x1af4,
         'device_id': 0x1000,
-        'control_register': 0x1,
+        'control_register': 0x0,
         'status_register': 0x1,
         'revision_id': 0x1,
         'class_code': 0x2,
@@ -111,5 +177,6 @@ def pci_configuration(tmpdir):
     packed_config = pack_config(fmt, config)
     with pci_config.open(mode='wb') as fd:
         fd.write(packed_config)
-    PciConfig = namedtuple('PciConfig', ['config_dict', 'config_path'])
-    return PciConfig(config, str(pci_config))
+
+    PciConfig = namedtuple('PciConfig', ['config_dict', 'device_path', 'config_path'])
+    return PciConfig(config, str(tmpdir), str(pci_config))

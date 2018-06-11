@@ -1,53 +1,37 @@
 import re
+import os
+
+
+from enum import Enum
+
+from mmap import mmap, ACCESS_WRITE
 from struct import unpack, calcsize
 
 
-class InvalidPCIAddressException(Exception):
-    """Invalid pci address string."""
+class PCIException(Exception):
+    pass
 
+
+class MmapNotSupportedException(PCIException):
+    pass
+
+
+class InvalidPCIAddressException(PCIException):
+    pass
+
+
+class UnknownDeviceClassException(PCIException):
+    pass
+
+
+class UnknownVendorException(PCIException):
     pass
 
 
 class PCIConfig(object):
-    def __init__(self,
-                 vendor_id,
-                 device_id,
-                 status_register,
-                 control_register,
-                 class_code,
-                 revision_id,
-                 header_type,
-                 latency_timer,
-                 cache_line_size,
-                 base_address_registers,
-                 card_bus_cis_pointer,
-                 subsystem_id,
-                 subsystem_vendor_id,
-                 expansion_rom_base_address,
-                 cap_pointer,
-                 max_latency,
-                 min_grant,
-                 interrupt_pin,
-                 interrupt_line):
-        self.vendor_id = vendor_id
-        self.device_id = device_id
-        self.control_register = control_register
-        self.status_register = status_register
-        self.revision_id = revision_id
-        self.class_code = class_code
-        self.cache_line_size = cache_line_size
-        self.latency_timer = latency_timer
-        self.header_type = header_type
-        self.base_address_registers = base_address_registers
-        self.card_bus_cis_pointer = card_bus_cis_pointer
-        self.subsystem_vendor_id = subsystem_vendor_id
-        self.subsystem_id = subsystem_id
-        self.expansion_rom_base_address = expansion_rom_base_address
-        self.cap_pointer = cap_pointer
-        self.interrupt_line = interrupt_line
-        self.interrupt_pin = interrupt_pin
-        self.min_grant = min_grant
-        self.max_latency = max_latency
+    def __init__(self, **kwargs):
+        for key, value in kwargs.items():
+            self.__dict__[key] = value
 
 
 class PCIConfigurationReader(object):
@@ -66,7 +50,7 @@ class PCIConfigurationReader(object):
                          status_register=config_tuple[3],
                          revision_id=config_tuple[4],
                          class_code=int.from_bytes(bytes(config_tuple[5:8]),
-                                                   byteorder='little', signed=False),
+                                                   byteorder='big', signed=False),
                          cache_line_size=config_tuple[8],
                          latency_timer=config_tuple[9],
                          header_type=config_tuple[10],
@@ -157,9 +141,111 @@ class PCIAddress(object):
         return re.match(pci_address_regex, address_string)
 
 
-class PCIDevice(object):
-    def __init__(self, device, domain=0, bus=0, function=0, address=None):
-        if address is None:
-            self.address = PCIAddress(device, domain, bus, function)
+class PCIDeviceController(object):
+    def __init__(self, device_path):
+        self.device_path = device_path
+
+    def config_path(self):
+        return '{device_path}/config'.format(device_path=self.device_path)
+
+    def enable_dma(self):
+        mask = 1 << 2
+        with open(self.config_path(), 'r+b') as config:
+            config.seek(4)
+            command_reg = bytearray(config.read(2))
+            command_reg[0] |= mask
+            config.seek(4)
+            config.write(command_reg)
+
+    def has_driver(self):
+        return os.path.exists('{}/driver/unbind'.format(self.device_path))
+
+    def unbind_driver(self, device_address):
+        unbind_path = '{}/driver/unbind'.format(self.device_path)
+        if os.path.exists(unbind_path):
+            with open(unbind_path, 'w') as unbind:
+                unbind.write(str(device_address))
         else:
-            self.address = address
+            raise RuntimeError('No bound driver')
+
+    def map_resource(self):
+        resource_fd, size = self.resource()
+        try:
+            return mmap(resource_fd.fileno(), size, access=ACCESS_WRITE)
+        except OSError:
+            raise MmapNotSupportedException('Failed mapping device<{}>'.format(self.device_path))
+
+    def resource(self):
+        resource_path = '{}/resource0'.format(self.device_path)
+        if os.path.exists(resource_path):
+            size = os.stat(resource_path).st_size
+            return open(resource_path, 'r+b'), size
+        else:
+            raise PCIException('No resource found at<{}>'.format(resource_path))
+
+
+class PCIDevice(object):
+    def __init__(self, address, pci_controller=None):
+        self.address = address
+        if pci_controller is None:
+            self.pci_controller = PCIDeviceController(self.path())
+        else:
+            self.pci_controller = pci_controller
+
+    def path(self):
+        return '/sys/bus/pci/devices/{address}'.format(address=self.address)
+
+    def has_driver(self):
+        return self.pci_controller.has_driver()
+
+    def unbind_driver(self):
+        self.pci_controller.unbind_driver(self.address)
+
+    def map_resource(self):
+        return self.pci_controller.map_resource()
+
+    def config(self):
+        return PCIConfigurationReader(self.pci_controller.config_path()).read()
+
+    def vendor(self):
+        vendor_id = self.config().vendor_id
+        try:
+            return PCIVendor(self.config().vendor_id)
+        except ValueError:
+            raise UnknownVendorException('Unknown vendor with id<{}>'.format(hex(vendor_id)))
+
+    def class_(self):
+        class_code = self.config().class_code
+        try:
+            return PCIClass(self.config().class_code)
+        except ValueError:
+            raise UnknownDeviceClassException(
+                'Unknown device class with code<{}>'.format(hex(class_code)))
+
+
+class PCIVendor(Enum):
+    virt_io = 0x1af4
+    intel = 0x8086
+
+
+class PCIClass(Enum):
+    unclassified = 0x00
+    storage_controller = 0x01
+    network_controller = 0x02
+    display_controller = 0x03
+    multimedia_controller = 0x04
+    memory_controller = 0x05
+    bridge = 0x06
+    communication_controller = 0x07
+    generic_system_peripheral = 0x08
+    docking_station = 0x0a
+    processor = 0x0b
+    serial_bus_controller = 0x0c
+    wireless_controller = 0x0d
+    intelligent_controller = 0x0e
+    satellite_communication_controller = 0x0f
+    encryption_controller = 0x10
+    signal_processing_controller = 0x11
+    processing_accelerator = 0x12
+    non_essential_instrumentation = 0x13
+    coprocessor = 0x40
