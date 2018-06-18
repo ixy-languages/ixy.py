@@ -1,13 +1,11 @@
-from ixypy.memory import Memory
-from ctypes import *
+from memory import DmaMemory
 
 
 def test_memory():
-    mem = Memory()
-    buff = mem.allocate_dma(5)
-    addr = buff.virtual_address()
-    buff.memory[:5] = b'Hello'
-    print(buff.physical_address())
-    ptr = pointer(addr)
-    for index, byte in enumerate(b'Hello'):
-        print(ptr[index])
+    mem = DmaMemory()
+    addr = buff.virt()
+    # buff.memory[:5] = b'Hello'
+    print(buff.phy())
+    # ptr = pointer(addr)
+    # for index, byte in enumerate(b'Hello'):
+        # print(ptr[index])

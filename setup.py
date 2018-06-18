@@ -1,6 +1,7 @@
-from distutils.core import setup
+from distutils.core import setup, Extension
 from Cython.Build import cythonize
 
 setup(
-    ext_modules = cythonize("memory.pyx")
+    packages=["ixypy"],
+    ext_modules=cythonize([Extension("memory", sources=["memory.pyx", "mem.c"])])
 )
