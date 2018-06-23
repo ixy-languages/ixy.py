@@ -4,12 +4,15 @@
 {
     "distutils": {
         "depends": [
-            "mem.h"
+            "src/cython/memory/mem.h"
+        ],
+        "include_dirs": [
+            "src/cython/memory"
         ],
         "name": "memory",
         "sources": [
-            "memory.pyx",
-            "mem.c"
+            "src/cython/memory/memory.pyx",
+            "src/cython/memory/mem.c"
         ]
     },
     "module_name": "memory"
@@ -785,7 +788,7 @@ static const char *__pyx_filename;
 
 static const char *__pyx_f[] = {
   "stringsource",
-  "memory.pyx",
+  "src/cython/memory/memory.pyx",
 };
 
 /*--- Type declarations ---*/

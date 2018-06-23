@@ -3,9 +3,9 @@ from memory import DmaMemory
 
 def test_memory():
     mem = DmaMemory()
-    addr = buff.virt()
+    addr = mem.virt()
     # buff.memory[:5] = b'Hello'
-    print(buff.phy())
+    print(mem.phy())
     # ptr = pointer(addr)
     # for index, byte in enumerate(b'Hello'):
         # print(ptr[index])
