@@ -33,6 +33,21 @@ class PCIConfig(object):
         for key, value in kwargs.items():
             self.__dict__[key] = value
 
+    def __str__(self):
+        fmt = ' '.join(['{:^19}']*5)
+        header = fmt.format('vendor_id',
+                            'device_id',
+                            'revision_id',
+                            'subsystem_vendor_id',
+                            'subsystem_id')
+        properties = [self.vendor_id,
+                      self.device_id,
+                      self.revision_id,
+                      self.subsystem_vendor_id,
+                      self.subsystem_id]
+        body = fmt.format(*[hex(property) for property in properties])
+        return '{}\n{}'.format(header, body)
+
 
 class PCIConfigurationReader(object):
     config_format = '< 4H 7B x 7I 2H I B 7x 4B'
@@ -194,6 +209,12 @@ class PCIDevice(object):
 
     def path(self):
         return '/sys/bus/pci/devices/{address}'.format(address=self.address)
+
+    def enable_dma(self):
+        self.pci_controller.enable_dma()
+
+    def resource(self):
+        return self.pci_controller.resource()
 
     def has_driver(self):
         return self.pci_controller.has_driver()

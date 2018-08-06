@@ -28,9 +28,7 @@ setup(
     ],
     include_package_data=True,
     install_requires=[],
-    setup_requires=[
-        'Cython==0.28.3',
-    ],
+    setup_requires=[],
     packages=find_packages('src'),
     package_dir={'': 'src'},
     ext_modules=cythonize([Extension("memory", sources=['src/cython/memory/memory.pyx',
