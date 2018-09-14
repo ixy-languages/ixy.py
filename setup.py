@@ -13,6 +13,11 @@ def read(*names, **kwargs):
     ).read()
 
 
+extentions = [
+        Extension("memory", sources=['src/cython/memory_tmp/memory.pyx', 'src/cython/memory_tmp/mem.c']),
+        Extension("memory2", sources=['src/cython/memory/memory.pyx', 'src/cython/memory/mem.c'])]
+
+
 setup(
     name="ixypy",
     version="0.0.1",
@@ -31,6 +36,4 @@ setup(
     setup_requires=[],
     packages=find_packages('src'),
     package_dir={'': 'src'},
-    ext_modules=cythonize([Extension("memory", sources=['src/cython/memory/memory.pyx',
-                                                        'src/cython/memory/mem.c'])])
-)
+    ext_modules=cythonize(extentions, annotate=True))
