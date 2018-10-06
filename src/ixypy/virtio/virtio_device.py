@@ -8,6 +8,19 @@ from memory2 import DmaMemory, Mempool, PktBuf
 
 from ixypy.ixy import IxyDevice
 from ixypy.virtio_type import *
+from ixypy.register import Register
+
+
+class VirtioRegister(Register):
+    def __init__(self, fd):
+        self.fd = fd
+
+    def write(self, value, length, offset):
+        pwrite(self.fd.fileno(), self._byte_str(value, length//8), offset)
+
+    @classmethod
+    def _byte_str(cls, num, size=1):
+        return num.to_bytes(size, 'little')
 
 
 class VQueue(object):
@@ -99,6 +112,7 @@ class VirtIo(IxyDevice):
         self.pci_device.enable_dma()
 
         self.resource, self.resource_size = self.pci_device.resource()
+        self.register = VirtioRegister(self.resource)
         self._reset_devices()
         self._ack_device()
         self._set_driver_status()

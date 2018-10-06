@@ -135,11 +135,16 @@ cdef class Mempool:
   def __dealloc__(self):
     free(self.mempool)
 
-  cdef pkt_buf* allocate_buffer(self, num_buffs=1):
-    actual_num_buffs = num_buffs
-    if self.mempool.free_stack_top < num_buffs:
-      # warning
-      actual_num_buffs = self.mempool.free_stack_top
+  cdef pkt_buf* allocate_buffers(self, num_buffers):
+    cdef pkt_buf* buffs
+    for i in range(num_buffers):
+      buf = &buffs[i]
+      buf = self.allocate_buffer()
+    return buffs
+
+  cdef pkt_buf* allocate_buffer(self):
+    if self.mempool.free_stack_top == 0:
+      raise MemoryError('No space available on the mempool')
     entry_id = self.mempool.free_stack[self.mempool.free_stack_top]
     self.mempool.free_stack_top = self.mempool.free_stack_top - 1
     pool = <uint8_t*>self.mempool.base_addr
