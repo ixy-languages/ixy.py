@@ -11,11 +11,11 @@ class MockRegister(Register):
     def __init__(self):
         self.mock = Mock()
 
-    def write(self, value, length, offset=0):
-        self.mock.write(value, length, offset)
+    def write(self, value, offset, length):
+        self.mock.write(value, offset, length)
 
-    def read(self, length, offset=0):
-        return self.mock.read(length, offset)
+    def read(self, length, offset):
+        return self.mock.read(offset, length)
 
 
 @pytest.mark.parametrize("length", [0, 8, 16, 32])
@@ -27,7 +27,7 @@ def test_write(length):
     getattr(register, 'write{}'.format(length))(value=5, offset=5)
 
     # then
-    register.mock.write.assert_called_with(5, length, 5)
+    register.mock.write.assert_called_with(5, 5, length//8)
 
 
 @pytest.mark.parametrize("length", [0, 8, 16, 32])
@@ -41,7 +41,7 @@ def test_read(length):
     result = getattr(register, 'read{}'.format(length))(offset=5)
 
     # then
-    register.mock.read.assert_called_with(length, 5)
+    register.mock.read.assert_called_with(5, length//8)
     assert result == 55
 
 

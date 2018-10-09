@@ -14,8 +14,9 @@ def read(*names, **kwargs):
 
 
 extentions = [
-        Extension("memory", sources=['src/cython/memory_tmp/memory.pyx', 'src/cython/memory_tmp/mem.c']),
-        Extension("memory2", sources=['src/cython/memory/memory.pyx', 'src/cython/memory/mem.c'])]
+    Extension("memory", sources=['src/cython/memory/memory.pyx', 'src/cython/memory/mem.c']),
+    Extension("vring", sources=['src/cython/virtio/virtio.pyx']),
+    Extension("buff", sources=['src/cython/buff/buff.pyx'])]
 
 
 setup(

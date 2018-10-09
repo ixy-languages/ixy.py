@@ -2,7 +2,7 @@ import re
 
 
 class Register(object):
-    def write(self, value, length, offset):
+    def write(self, value, offset, length):
         """
         Args:
             value: the value to be written
@@ -11,7 +11,7 @@ class Register(object):
         """
         pass
 
-    def read(self, length, offset):
+    def read(self, offset, length):
         """
         Args:
             length: length in bytes of the value
@@ -27,7 +27,7 @@ class Register(object):
             if length % 8 != 0:
                 raise ValueError('Invalid length {}'.format(length))
             rw = getattr(self, op['operation'])
-            kwargs['length'] = int(op['length'])
+            kwargs['length'] = length//8
             return rw(*args, **kwargs)
 
         if op:

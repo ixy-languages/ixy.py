@@ -1,6 +1,6 @@
 import pytest
 
-from memory2 import DmaMemory, Mempool, PktBuf
+from memory import DmaMemory, Mempool, PktBuf
 
 
 # def test_should_fail_when_no_contiguous_memory_available():

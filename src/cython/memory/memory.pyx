@@ -1,7 +1,8 @@
-from libc.stdint cimport uintptr_t, uint32_t, uint8_t
+from libc.stdint cimport uintptr_t, uint32_t, uint8_t, uint16_t, uint64_t
 from libc.string cimport memset, memcpy
 from libc.stdlib cimport malloc, free
 from posix.unistd cimport close, read, off_t
+from cpython cimport Py_buffer
 
 import os
 import stat
@@ -18,6 +19,7 @@ cdef extern from "mem.h":
 # static fields not supported in cython, therefore module lvl variable is used
 cdef uint32_t huge_pg_id = 0
 
+
 cdef extern from "sys/mman.h":
     void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t offset)
     enum:
@@ -29,10 +31,14 @@ cdef extern from "sys/mman.h":
 cdef class DmaMemory:
   cdef void* virtual_address
   cdef readonly uintptr_t physical_address
-  cdef uint32_t size
+  cdef Py_ssize_t size
+  cdef Py_ssize_t shape[1]
+  cdef Py_ssize_t strides[1]
+
+
 
   def __cinit__(self, uint32_t size, bint aligned=True):
-    self.size = size
+    self.size = <Py_ssize_t>size
     actual_size = DmaMemory._round_size(size)
     if aligned and actual_size > HUGE_PAGE_SIZE:
       raise MemoryError()
@@ -47,6 +53,25 @@ cdef class DmaMemory:
     os.close(fd)
     os.unlink(path)
     self.physical_address = virt_to_phys(self.virtual_address)
+
+  def __getbuffer__(self, Py_buffer *buffer, int flags):
+    cdef Py_ssize_t itemsize = 1
+    self.shape[0] = self.size
+    self.strides[0] = 1
+    buffer.buf = <char *>self.virtual_address
+    buffer.format = 'B'                     # float
+    buffer.internal = NULL                  # see References
+    buffer.itemsize = itemsize
+    buffer.len = self.size  # product(shape) * itemsize
+    buffer.ndim = 1
+    buffer.obj = self
+    buffer.readonly = 0
+    buffer.shape = self.shape
+    buffer.strides = self.strides
+    buffer.suboffsets = NULL
+
+  def __str__(self):
+    return 'VAddr={} PAddr={} size={}'.format(<uintptr_t>self.virtual_address, self.physical_address, self.size)
 
   def set_to(self, int value):
     memset(self.virtual_address, value, self.size)
@@ -74,6 +99,9 @@ cdef class DmaMemory:
     if size % HUGE_PAGE_SIZE != 0:
       return ((size >> HUGE_PAGE_BITS) + 1) << HUGE_PAGE_BITS
     return size
+
+  # cdef buf(self):
+  #   return <char[:self.size]>self.virtual_address
 
 
 # everything here contains virtual addresses, the mapping to physical addresses are in the pkt_buf
