@@ -2,7 +2,6 @@ from unittest.mock import Mock
 
 import pytest
 
-
 from ixypy.register import Register
 
 

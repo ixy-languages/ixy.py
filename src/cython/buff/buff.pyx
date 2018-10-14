@@ -11,7 +11,6 @@ cdef class Buff:
     self.size = size
     self.buf = <void*>malloc(size)
 
-
   def __getbuffer__(self, Py_buffer *buffer, int flags):
     cdef Py_ssize_t itemsize = 1
     self.shape[0] = self.size

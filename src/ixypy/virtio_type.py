@@ -43,3 +43,25 @@ VIRTIO_F_IOMMU_PLATFORM = 33
 VIRTIO_PCI_QUEUE_ADDR_SHIFT = 12
 
 VRING_AVAIL_F_NO_INTERRUPT = 1
+
+# This marks a buffer as continuing via the next field. */
+VRING_DESC_F_NEXT = 1
+# This marks a buffer as write-only (otherwise read-only). */
+VRING_DESC_F_WRITE = 2
+# This means the buffer contains a list of buffer descriptors. */
+VRING_DESC_F_INDIRECT = 4
+
+"""
+ Control the RX mode, ie. promiscuous, allmulti, etc...
+ All commands require an "out" sg entry containing a 1 byte
+ state value, zero = disable, non-zero = enable.  Commands
+ 0 and 1 are supported with the VIRTIO_NET_F_CTRL_RX feature.
+ Commands 2-5 are added with VIRTIO_NET_F_CTRL_RX_EXTRA.
+ """
+VIRTIO_NET_CTRL_RX = 0
+VIRTIO_NET_CTRL_RX_PROMISC = 0
+VIRTIO_NET_CTRL_RX_ALLMULTI = 1
+VIRTIO_NET_CTRL_RX_ALLUNI = 2
+VIRTIO_NET_CTRL_RX_NOMULTI = 3
+VIRTIO_NET_CTRL_RX_NOUNI = 4
+VIRTIO_NET_CTRL_RX_NOBCAST = 5

@@ -7,17 +7,32 @@ from cpython cimport Py_buffer
 import os
 import stat
 import resource
+import array
 
 DEF HUGE_PAGE_BITS = 21
 DEF HUGE_PAGE_SIZE = 1 << HUGE_PAGE_BITS
 DEF SIZE_PKT_BUF_HEADROOM = 40
 
 
-cdef extern from "mem.h":
-    uintptr_t virt_to_phys(void* virt_addr)
+# cdef extern from "mem.h":
+#     uintptr_t virt_to_phys(void* virt_addr)
 
 # static fields not supported in cython, therefore module lvl variable is used
 cdef uint32_t huge_pg_id = 0
+
+cdef uintptr_t virt_to_phys(void* virt):
+  cdef long pagesize = <long>resource.getpagesize()
+  # check error
+  fd = os.open("/proc/self/pagemap", os.O_RDONLY)
+
+  cdef uintptr_t offset = <uintptr_t> virt / pagesize * sizeof(uintptr_t)
+  # check error
+  os.lseek(fd, offset, os.SEEK_SET)
+  # check error
+  cdef uintptr_t phy = <uintptr_t>(array.array('i', os.read(fd, sizeof(phy)))[0])
+  os.close(fd)
+  # phy = <uintptr_t *>&data[0]
+  return (phy & 0x7fffffffffffffULL) * pagesize + (<uintptr_t>virt) % pagesize
 
 
 cdef extern from "sys/mman.h":
@@ -35,8 +50,6 @@ cdef class DmaMemory:
   cdef Py_ssize_t shape[1]
   cdef Py_ssize_t strides[1]
 
-
-
   def __cinit__(self, uint32_t size, bint aligned=True):
     self.size = <Py_ssize_t>size
     actual_size = DmaMemory._round_size(size)
@@ -50,6 +63,7 @@ cdef class DmaMemory:
     fd = os.open(path, os.O_CREAT | os.O_RDWR, stat.S_IRWXU)
     # check error
     self.virtual_address = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_HUGETLB, fd, 0)
+    memset(self.virtual_address, 0xab, self.size)
     os.close(fd)
     os.unlink(path)
     self.physical_address = virt_to_phys(self.virtual_address)
@@ -59,10 +73,10 @@ cdef class DmaMemory:
     self.shape[0] = self.size
     self.strides[0] = 1
     buffer.buf = <char *>self.virtual_address
-    buffer.format = 'B'                     # float
-    buffer.internal = NULL                  # see References
+    buffer.format = 'B'
+    buffer.internal = NULL
     buffer.itemsize = itemsize
-    buffer.len = self.size  # product(shape) * itemsize
+    buffer.len = self.size
     buffer.ndim = 1
     buffer.obj = self
     buffer.readonly = 0
@@ -71,25 +85,10 @@ cdef class DmaMemory:
     buffer.suboffsets = NULL
 
   def __str__(self):
-    return 'VAddr={} PAddr={} size={}'.format(<uintptr_t>self.virtual_address, self.physical_address, self.size)
+    return 'DmaMemory(vaddr=0x{:02X}, phyaddr=0x{:02X}, size={:d})'.format(<uintptr_t>self.virtual_address, self.physical_address, self.size)
 
-  def set_to(self, int value):
-    memset(self.virtual_address, value, self.size)
-
-  @staticmethod
-  cdef uintptr_t virt_to_phys(void* virt):
-    cdef uintptr_t* phy = NULL
-    cdef long pagesize = <long>resource.getpagesize()
-    # check error
-    fd = os.open("/proc/self/pagemap", os.O_RDONLY)
-    cdef uintptr_t offset = <uintptr_t> virt / pagesize * sizeof(uintptr_t)
-    # check error
-    os.lseek(fd, offset, os.SEEK_SET)
-    # check error
-    cdef bytearray data = bytearray(os.read(fd, sizeof(phy)))
-    os.close(fd)
-    phy = <uintptr_t *>&data[0]
-    return (phy[0]&0x7fffffffffffffULL) * pagesize + (<uintptr_t>virt) % pagesize
+  # def set_to(self, int value):
+  #   memset(self.virtual_address, value, self.size)
 
   @staticmethod
   cdef uint32_t _round_size(uint32_t size):
@@ -132,6 +131,23 @@ cdef class PktBuf:
   def to_buff(self, char* data):
     memcpy(self.buf.data, data, len(data))
 
+  def physical_address(self):
+    return self.buf.buf_addr_phy
+
+  def data_offset(self):
+    return <Py_ssize_t>&(<pkt_buf*>NULL).data
+
+  def data_physical_address(self):
+    return self.buf.buf_addr_phy + self.data_offset()
+
+  def free(self):
+    cdef mempool* mempool = self.buf.mempool
+    mempool.free_stack[mempool.free_stack_top] = self.buf.mempool_idx
+    mempool.free_stack_top += 1
+
+  def __str__(self):
+    return 'phy={} mempool_idx={} size={}'.format(self.buf.buf_addr_phy, self.buf.mempool_idx, self.buf.size)
+
 
 cdef class Mempool:
   cdef mempool* mempool
@@ -155,7 +171,7 @@ cdef class Mempool:
       # buffer allocation
       buf_address = <uint8_t*>self.mempool.base_addr
       buf = <pkt_buf*>&buf_address[i * entry_size]
-      buf.buf_addr_phy = DmaMemory.virt_to_phys(buf)
+      buf.buf_addr_phy = virt_to_phys(buf)
       buf.mempool_idx = i
       buf.mempool = self.mempool
       buf.size = 0
