@@ -5,7 +5,7 @@ from ixypy.pci import PCIDevice, PCIAddress
 
 
 def test_virtio():
-    address = PCIAddress.from_address_string('0000:00:13.0')
+    address = PCIAddress.from_address_string('0000:00:08.0')
 
     device = PCIDevice(address)
     pci_config = device.config()

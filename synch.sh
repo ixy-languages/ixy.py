@@ -68,7 +68,7 @@ fi
 # This is the real deal.
 # watch...
 echo "Watch '$WATCH' and sync with '$DEST'"
-fswatch -e ".*___.*" -e "\.hg" -e "\.git" -e "hg" -e "vagrant" $WATCH |\
+fswatch -e "\.tox" -e ".*___.*" -e "\.hg" -e "\.git" -e "hg" -e "vagrant" $WATCH |\
 	while read file
 	do
 		# and rsync everything!

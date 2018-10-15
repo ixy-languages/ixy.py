@@ -6,11 +6,12 @@ from functools import reduce
 from os import pwrite, pread, getuid
 from struct import calcsize, unpack, pack
 
-from memory import DmaMemory, Mempool, PktBuf
+from memory import DmaMemory
 
-from ixypy.virtio.structures import VRing, Queue, VNetworkControlHeader, VCommand
+from ixypy.mempool import Mempool, PacketBuffer
+from ixypy.virtio.structures import VRing, VQueue, VirtioNetworkControl, PromiscuousModeCommand, VirtioNetworkHeader
 from ixypy.ixy import IxyDevice
-from ixypy.virtio_type import *
+from ixypy.virtio.types import *
 from ixypy.register import Register
 
 
@@ -31,6 +32,7 @@ class VirtioRegister(Register):
 
 
 class VirtIo(IxyDevice):
+    net_hdr = VirtioNetworkHeader(flags=0, gso_type=VIRTIO_NET_HDR_GSO_NONE, header_len=14+20+8)
     legacy_device_id = 0x1000
 
     def __init__(self, pci_device):
@@ -60,11 +62,11 @@ class VirtIo(IxyDevice):
         self._setup_ctrl_queue()
         self.signal_ok()
         self.verify_device()
+        log.debug('Setting promisc mode')
         self.set_promisc()
 
     def set_promisc(self, on=True):
-        header = VNetworkControlHeader(VIRTIO_NET_CTRL_RX, VIRTIO_NET_CTRL_RX_PROMISC)
-        command = VCommand(header, on)
+        command = VirtioNetworkControl(PromiscuousModeCommand(on=True))
         self.send_cmd(command)
 
     def get_link_speed(self):
@@ -73,11 +75,71 @@ class VirtIo(IxyDevice):
     def get_stats(self):
         pass
 
-    def rx_batch(self):
-        pass
+    def rx_batch(self, buffs):
+        vq = self.rx_queue
+        buff_indx = 0
+        for i in range(len(buffs)):
+            buff_indx = i
+            if vq.used_last_index == vq.vring.used.index:
+                break
+            used_element = vq.vring.used.rings[vq.used_last_idx % vq.vring.size]
+            log.debug('UE: %s', used_element)
+            desc = vq.vring.descriptors[used_element.id]
+            vq.used_last_index += 1
+            if desc.flags != VRING_DESC_F_WRITE:
+                log.error("Unsupported rx flags on descriptor: %x", desc.flags)
+            desc.reset()
+            buf = vq.virtual_addresses[used_element.id]
+            buf.size = used_element.length
+            buffs[i] = buf
+            self.rx_bytes += buf.size
+            self.rx_pkts += 1
+        for index, desc in vq.vring.descriptors:
+            if desc.address != 0:
+                continue
+            pkt_buf = vq.mempool.allocate_buffer()
+            if not pkt_buf:
+                log.error('Failed to allocate rx buffer')
+            pkt_buf.size = vq.mempool.buffer_size
+            self.net_hdr.to_buffer(pkt_buf.head_room_buffer[-len(self.net_hdr):])
+            desc.length = pkt_buf.size + len(self.net_hdr)
+            offset = pkt_buf.data_offset - len(self.net_hdr)
+            desc.address = pkt_buf.physical_address + offset
+            desc.flags = VRING_DESC_F_WRITE
+            desc.next = 0
+            vq.virtual_addresses[index] = pkt_buf
+            vq.vring.available.rings[vq.vring.available.index % vq.vring.size] = index
+            vq.vring.available.index += 1
+            self._notify_queue(0)
+        return buff_indx
 
-    def tx_batch(self):
-        pass
+    def tx_batch(self, buffers):
+        vq = self.tx_queue
+        while vq.used_last_index != vq.ring.used.index:
+            used_element = vq.vring.used.rings[vq.used_last_index % vq.vring.size]
+            desc = vq.vring.descriptors[used_element.id]
+            desc.address = 0
+            desc.length = 0
+            vq.mempool.free_buffer(vq.virtual_addresses[used_element.id])
+            vq.used_last_index += 1
+        buffer_index = 0
+        index = 0
+        for buf_idx, buffer in enumerate(buffers):
+            index, desc = vq.get_free_descriptor()
+            self.tx_bytes += buffer.size
+            self.tx_pkts += 1
+            vq.virtual_addresses[index] = buffer
+            self.net_hdr.to_buffer(buffer.head_room_buffer[-len(self.net_hdr):])
+
+            desc.length = buffer.size + len(self.net_hdr)
+            offset = buffer.data_offset - len(self.net_hdr)
+            desc.address = buffer.physical_address + offset
+            desc.flags = 0
+            desc.next_descriptor = 0
+            vq.vring.available.rings[index] = index
+        vq.vring.available.index = buffer_index
+        self._notify_queue(1)
+        return buffer_index
 
     def verify_device(self):
         if self.get_pci_status() == VIRTIO_CONFIG_STATUS_FAILED:
@@ -89,61 +151,78 @@ class VirtIo(IxyDevice):
     def get_pci_status(self):
         return self.register.read16(VIRTIO_PCI_STATUS)
 
-    def send_cmd(self, cmd):
-        if cmd.header.class_ != VIRTIO_NET_CTRL_RX:
-            raise ValueError('Command class is not supported')
-        # find free descriptor slot
-        vq = self.ctrl_queue.vqueue
-        index, header_dscr = self.ctrl_queue.get_free_descriptor()
-        buf = PktBuf(self.ctrl_queue.mempool)
-        # TODO implement buffer protocol
-        buf.to_buff(cmd.to_bytes())
-        self.ctrl_queue.virtual_addresses[index] = buf
+    def send_cmd(self, net_ctrl):
+        if net_ctrl.command_class != VIRTIO_NET_CTRL_RX:
+            raise ValueError('Command class[{}] is not supported'.format(net_ctrl.command_class))
 
+        send_queue = self.ctrl_queue.vring
+        index, header_descriptor = self.ctrl_queue.get_free_descriptor()
+        log.debug('Found descriptor slot at {:d} ({:d})'.format(index, send_queue.size))
+        log.debug('Packet buffer allocation')
+        pkt_buf = self.ctrl_queue.mempool.get_buffer()
+        net_ctrl.to_buffer(pkt_buf.data_buffer)
+        self.ctrl_queue.virtual_addresses[index] = pkt_buf
+
+        log.debug('Writing to descriptor {:d}'.format(index))
+        offset = pkt_buf.data_offset
         # Device-readable head: cmd header
-        header_dscr.write(len(cmd.header), buf.data_physical_address(), VRING_DESC_F_NEXT, index + 1)
+        header_descriptor.length = 2
+        header_descriptor.address = pkt_buf.physical_address + offset
+        header_descriptor.flags = VRING_DESC_F_NEXT
+        header_descriptor.next_descriptor, payload_dscr = self.ctrl_queue.get_free_descriptor()
 
+        log.debug('Writing to descriptor {:d}'.format(header_descriptor.next_descriptor))
         # Device-readable payload: data
-        payload_dscr = vq.descriptors[index+1]
-        payload_dscr.write(len(cmd), buf.data_physical_address() + 2, VRING_DESC_F_NEXT, index + 2)
+        payload_dscr.length = len(net_ctrl) - 2 - 1
+        payload_dscr.address = pkt_buf.physical_address + offset + 2
+        payload_dscr.flags = VRING_DESC_F_NEXT
+        payload_dscr.next_descriptor, ack_flag = self.ctrl_queue.get_free_descriptor()
 
+        log.debug('Writing to descriptor {:d}'.format(payload_dscr.next_descriptor))
         # Device-writable tail: ack flag
-        ack_dscr = vq.descriptors[index+2]
-        ack_dscr.write(1, buf.data_physical_address() + len(cmd) - 1, VRING_DESC_F_WRITE, 0)
-        available_queue_index = vq.available_queues.idx % vq.size
-        vq.available_queues.set_ring(index, available_queue_index)
-        vq.available_queues.idx += 1
+        ack_flag.length = 1
+        ack_flag.address = pkt_buf.physical_address + offset + len(net_ctrl) - 1
+        ack_flag.flags = VRING_DESC_F_WRITE
+        ack_flag.next_descriptor = 0
 
+        log.debug('Avail index %d', send_queue.available.index)
+        log.debug('Ring index = %d', send_queue.available.index % send_queue.size)
+        send_queue.available.rings[send_queue.available.index % send_queue.size] = index
+        send_queue.available.index += 1
+
+        log.debug('Notifying queue')
+        self._notify_queue(2)
         # wait until buffer processed
-        # while self.ctrl_queue.used_last_index == vq.used_queues.idx:
-        #     print("Waiting...")
-        #     time.sleep(1)
-        self.ctrl_queue.used_last_index += 1
-        # Check status and free buffer
-        vq_used = vq.used_queues.used_elements[vq.used_queues.idx]
-        if vq_used.id() != index:
-            print("Used buffer has different index as sent one")
+        while self.ctrl_queue.used_last_index == send_queue.used.index:
+            time.sleep(1)
+        log.debug('Retrieved used element')
+        log.debug('Used buff index => %d', send_queue.used.index)
+        used_element = send_queue.used.rings[send_queue.used.index]
+        log.debug('UE: %s', used_element)
+        if used_element.id != index:
+            log.error('Used buffer has different index as sent one')
+        log.debug('Freeing buffer')
+        self.ctrl_queue.mempool.free_buffer(pkt_buf)
+        for descriptor in [header_descriptor, payload_dscr, ack_flag]:
+            descriptor.reset()
 
-        if self.ctrl_queue.virtual_addresses[index] != buf:
-            print("Buffer differ")
-
-        buf.free()
-        self.ctrl_queue.used_last_index += 1
-        vq.descriptors[index].reset()
-        vq.descriptors[index+1].reset()
-        vq.descriptors[index+2].reset()
+    def _notify_queue(self, index):
+        self.register.write16(index, VIRTIO_PCI_QUEUE_NOTIFY)
 
     def _notify_offset(self):
         return self.register.read16(VIRTIO_PCI_QUEUE_NOTIFY)
 
     def _setup_rx_queue(self):
+        log.debug('Setting up rx queue')
         self.rx_queue = self._build_queue(index=0)
 
     def _setup_tx_queue(self):
-        self.tx_queue = self._build_queue(1)
+        log.debug('Setting up tx queue')
+        self.tx_queue = self._build_queue(index=1, mempool=False)
 
     def _setup_ctrl_queue(self):
-        self.ctrl_queue = self._build_queue(2)
+        log.debug('Setting up control queue')
+        self.ctrl_queue = self._build_queue(index=2)
 
     def _build_queue(self, index, mempool=True):
         log.debug('Setting up queue %d', index)
@@ -155,13 +234,13 @@ class VirtIo(IxyDevice):
         log.debug('notify offset: %d', notify_offset)
         log.debug('queue size in bytes: %d', virt_queue_mem_size)
         mem = DmaMemory(virt_queue_mem_size)
-        log.debug(mem)
+        log.debug('Allocated %s', mem)
         self._set_physical_address(mem.physical_address)
         # virtual queue initialization
-        vq = VRing(max_queue_size, memoryview(mem))
-        queue = Queue(vq, notify_offset, Mempool(max_queue_size * 4, 2048)) if mempool else Queue(vq, notify_offset)
-        queue.disable_interrupts()
-        return queue
+        vring = VRing(memoryview(mem), max_queue_size)
+        vqueue = VQueue(vring, notify_offset, Mempool.allocate(max_queue_size * 4, 2048)) if mempool else VQueue(vring, notify_offset)
+        vqueue.disable_interrupts()
+        return vqueue
 
     def _create_virt_queue(self, idx):
         self.register.write16(idx, VIRTIO_PCI_QUEUE_SEL)
@@ -212,6 +291,6 @@ class VirtIo(IxyDevice):
         features = [VIRTIO_NET_F_CSUM,
                     VIRTIO_NET_F_GUEST_CSUM,
                     VIRTIO_NET_F_CTRL_VQ,
-                    VIRTIO_F_ANY_LAYOUT,
+                    # VIRTIO_F_ANY_LAYOUT,
                     VIRTIO_NET_F_CTRL_RX]
         return reduce(lambda x, y: x | y, map(lambda x: 1 << x, features), 0)

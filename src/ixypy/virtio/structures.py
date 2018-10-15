@@ -1,58 +1,127 @@
-import logging as log
 from struct import Struct, calcsize, pack, pack_into, unpack_from
 from collections import OrderedDict
-from ixypy.virtio_type import VRING_AVAIL_F_NO_INTERRUPT
+from ixypy.virtio.types import VRING_AVAIL_F_NO_INTERRUPT, VIRTIO_NET_CTRL_RX, VIRTIO_NET_CTRL_RX_PROMISC
+from ixypy.virtio.exception import VirtioException, BufferSizeException
 
 MAX_QUEUE_SIZE = 32768
 
 
-class Queue(object):
-    def __init__(self, vqueue, notification_offset, mempool=None, used_last_index=0):
+def align(offset, alignment=4096):
+    return (offset + (alignment-1)) & -alignment
+
+
+class VQueue(object):
+    def __init__(self, vring, notification_offset, mempool=None, used_last_index=0):
         self.mempool = mempool
-        self.vqueue = vqueue
+        self.vring = vring
         self.notification_offset = notification_offset
         self.used_last_index = used_last_index
-        self.virtual_addresses = [0]*vqueue.size
+        self.virtual_addresses = [0]*vring.size
+        self.buffers = []
 
     def disable_interrupts(self):
-        self.vqueue.available.flags = VRING_AVAIL_F_NO_INTERRUPT
-        self.vqueue.used.flags = 0
+        self.vring.available.flags = VRING_AVAIL_F_NO_INTERRUPT
+        self.vring.used.flags = 0
 
     def get_free_descriptor(self):
-        for index, descriptor in enumerate(self.vqueue.descriptors):
-            if descriptor.address() == 0:
+        for index, descriptor in enumerate(self.vring.descriptors):
+            if descriptor.address == 0:
                 return index, descriptor
-        raise ValueError('Queue is full')
+        raise VirtioException('Queue overflow')
 
 
-class VNetworkControlHeader(object):
-    fmt = 'B B'
+class VirtioNetworkHeader(object):
+    data_format = 'B B H H H H'
 
-    def __init__(self, class_, cmd):
-        self.struct = Struct(self.fmt)
-        self.class_ = class_
-        self.cmd = cmd
+    def __init__(self, flags=0, gso_type=0, header_len=0, gso_size=0, csum_start=0, csum_offset=0):
+        self.flags = flags
+        self.gso_type = gso_type
+        self.header_len = header_len
+        self.gso_size = gso_size
+        self.csum_start = csum_start
+        self.csum_offset = csum_offset
+        self.struct = Struct(self.data_format)
+
+    def to_buffer(self, buffer, offset=0):
+        self.struct.pack_into(buffer, offset, *self._fields())
+
+    def _fields(self):
+        return [
+            self.flags,
+            self.gso_type,
+            self.header_len,
+            self.gso_size,
+            self.csum_start,
+            self.csum_offset]
 
     def __len__(self):
-        return calcsize(self.fmt)
+        return self.struct.size
+
+    @staticmethod
+    def byte_size():
+        return calcsize(VirtioNetworkHeader.data_format)
 
 
 class VCommand(object):
-    def __init__(self, header, on):
-        self.header = header
-        self.on = on
+    def __init__(self, class_, id_):
+        self.class_ = class_
+        self.id = id_
 
-    def to_bytes(self):
-        return pack('{} B'.format(self.header.fmt), self.header.class_, self.header.cmd, self.on)
+    def bytes(self):
+        pass
+
+
+class PromiscuousModeCommand(VCommand):
+    def __init__(self, on=True):
+        self.on = on
+        super().__init__(VIRTIO_NET_CTRL_RX, VIRTIO_NET_CTRL_RX_PROMISC)
+
+    def bytes(self):
+        return pack('B', self.on)
 
     def __len__(self):
-        return calcsize('{} B'.format(self.header.fmt))
+        return 1
+
+
+class VirtioNetworkControl(object):
+    """
+    u8 class
+    u8 command
+    u8 command-specific-data[]
+    u8 ack
+    """
+    data_format = 'B B {:d}B B'
+
+    def __init__(self, command, ack=None):
+        self.command = command
+        self.ack = ack
+
+    def to_buffer(self, buffer, offset=0):
+        fmt = self.data_format.format(len(self.command))
+        pack_into(fmt, buffer, offset, self.command.class_, self.command.id, *self.command.bytes(), 1)
+
+    @staticmethod
+    def from_bytes(byte_sequence):
+        pass
+
+    @property
+    def command_class(self):
+        return self.command.class_
+
+    @property
+    def command_id(self):
+        return self.command.id
+
+    def __len__(self):
+        return calcsize(self.data_format.format(len(self.command)))
 
 
 class VRing(object):
-    def __init__(self, size, buffer, alignment=4096):
+    def __init__(self, buffer, size, alignment=4096):
         if size > MAX_QUEUE_SIZE:
-            raise ValueError("Size exceeded maximum size")
+            raise VirtioException("Size[{}] exceeded maximum size[{}]".format(size, MAX_QUEUE_SIZE))
+        if len(buffer) < self.byte_size(size, alignment):
+            raise BufferSizeException("Required: {}, Received: {}".format(len(buffer), self.byte_size(size, alignment)))
         self.size = size
         self.buffer = buffer
         self.alignment = alignment
@@ -61,58 +130,64 @@ class VRing(object):
         self.used = self._used()
 
     def _descriptors(self):
-        item_size = VQueueDescriptor.byte_size()
+        item_size = VRingDescriptor.byte_size()
         descriptor_tbl_size = VRing.descriptor_table_size(self.size)
         sub_buff = self.buffer[:descriptor_tbl_size]
-        return [VQueueDescriptor(sub_buff[i*item_size:item_size*(i+1)]) for i in range(len(self))]
+        descriptor_buffers = [sub_buff[i*item_size:item_size*(i+1)] for i in range(self.size)]
+        return [VRingDescriptor.create_descriptor(dsc_buff) for dsc_buff in descriptor_buffers]
 
     def _available(self):
         descriptor_tbl_size = VRing.descriptor_table_size(self.size)
         available_queue_size = VRing.available_queue_size(self.size)
         sub_buff = self.buffer[descriptor_tbl_size:(descriptor_tbl_size + available_queue_size)]
-        return VQueueAvailable(sub_buff, self.size)
+        avail = VRingAvailable(sub_buff, self.size)
+        avail.index = 0
+        for i in range(len(avail.rings)):
+            avail.rings[i] = 0
+        return VRingAvailable(sub_buff, self.size)
 
     def _used(self):
         buffer_start = len(self) - VRing.used_queue_size(self.size)
         sub_buff = self.buffer[buffer_start:len(self)]
-        return VQueueUsed(sub_buff, self.size)
+        used = VRingUsed(sub_buff, self.size)
+        used.index = 0
+        for ring in used.rings:
+            ring.id = 0
+            ring.len = 0
+        return used
 
     def __len__(self):
         return VRing.byte_size(self.size, self.alignment)
 
     @staticmethod
-    def used_queue_size(size):
-        return 6 + VQueueUsedElement.byte_size() * size
+    def used_queue_size(queue_size):
+        return VRingUsed.byte_size(queue_size)
 
     @staticmethod
-    def descriptor_table_size(size):
-        return VQueueDescriptor.byte_size() * size
+    def descriptor_table_size(queue_size):
+        return VRingDescriptor.byte_size() * queue_size
 
     @staticmethod
-    def available_queue_size(size):
-        return 6 + 2 * size
+    def available_queue_size(queue_size):
+        return VRingAvailable.byte_size(queue_size)
 
     @staticmethod
-    def padding(size, alignment):
-        total_qsz = VRing.byte_size(size, alignment)
-        dsc_tbl_sz = VRing.descriptor_table_size(size)
-        avail_qsz = VRing.available_queue_size(size)
-        used_qsz = VRing.used_queue_size(size)
-        return total_qsz - (dsc_tbl_sz + avail_qsz + used_qsz)
+    def padding(queue_size, alignment=4096):
+        dsc_tbl_sz = VRing.descriptor_table_size(queue_size)
+        avail_sz = VRing.available_queue_size(queue_size)
+        offset = dsc_tbl_sz + avail_sz
+        return -offset & (alignment - 1)
 
     @staticmethod
-    def align(val, alignment):
-        return (val + alignment) & ~alignment
-
-    @staticmethod
-    def byte_size(max_queue_size, alignment=4096):
-        dsc_tbl_sz = VRing.descriptor_table_size(max_queue_size)
-        avail_qsz = VRing.available_queue_size(max_queue_size)
-        used_qsz = VRing.used_queue_size(max_queue_size)
-        return VRing.align(dsc_tbl_sz + avail_qsz, alignment)+VRing.align(used_qsz, alignment)
+    def byte_size(queue_size, alignment=4096):
+        # see 2.4.2
+        dsc_tbl_sz = VRing.descriptor_table_size(queue_size)
+        avail_qsz = VRing.available_queue_size(queue_size)
+        used_qsz = VRing.used_queue_size(queue_size)
+        return align(dsc_tbl_sz + avail_qsz, alignment) + used_qsz
 
 
-class VQueueDescriptor(object):
+class VRingDescriptor(object):
     data_format = OrderedDict({
         'address': 'Q',
         'length': 'I',
@@ -123,6 +198,19 @@ class VQueueDescriptor(object):
     def __init__(self, buffer):
         self.struct = Struct(self.format())
         self.buffer = buffer
+
+    @staticmethod
+    def create_descriptor(buffer):
+        """
+        Creates a new descriptor around a buffer
+        and sets all the fields to zero
+        """
+        descriptor = VRingDescriptor(buffer)
+        descriptor.length = 0
+        descriptor.address = 0
+        descriptor.flags = 0
+        descriptor.next_descriptor = 0
+        return descriptor
 
     @property
     def address(self):
@@ -169,24 +257,24 @@ class VQueueDescriptor(object):
 
     @staticmethod
     def format():
-        return ' '.join([item for _, item in VQueueDescriptor.data_format.items()])
+        return ' '.join([item for _, item in VRingDescriptor.data_format.items()])
 
     @staticmethod
     def byte_size():
-        return calcsize(VQueueDescriptor.format())
+        return calcsize(VRingDescriptor.format())
 
     def _unpack(self):
         return self.struct.unpack(self.buffer)
 
 
-class VQueueAvailable(object):
+class VRingAvailable(object):
     format = 'H H'
 
     def __init__(self, buffer, size):
         self.size = size
-        self.struct = Struct(VQueueAvailable.format.format(size))
+        self.struct = Struct(VRingAvailable.format.format(size))
         self.buffer = buffer[:self.struct.size]
-        self.rings = RingList(buffer[self.struct.size:-2], size)
+        self.rings = RingList(buffer[self.struct.size:], size)
 
     @property
     def flags(self):
@@ -213,7 +301,7 @@ class VQueueAvailable(object):
          uint16_t available[num];
          uint16_t used_event_idx;
         """
-        return calcsize(VQueueAvailable.format.format(queue_size)) + queue_size * 2 + 2
+        return calcsize('H H {:d}H'.format(queue_size))
 
     def __str__(self):
         return 'size={} buffer_size={}'.format(self.size, len(self.buffer))
@@ -238,17 +326,47 @@ class RingList(object):
     def __setitem__(self, index, value):
         pack_into('H', self.buffer, self._get_offset(index), value)
 
+    def __len__(self):
+        return self.size
+
+    def __iter__(self):
+        return RingListIterator(self)
+
     @staticmethod
     def _get_offset(index):
         return calcsize('{:d}H'.format(index))
 
 
-class VQueueUsedElement(object):
+class RingListIterator(object):
+    def __init__(self, ring_list):
+        self.i = 0
+        self.ring_list = ring_list
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self.i < len(self.ring_list):
+            ring = self.ring_list[self.i]
+            self.i += 1
+            return ring
+        else:
+            raise StopIteration()
+
+
+class VRingUsedElement(object):
     format = 'H x x I'
 
     def __init__(self, buffer):
         self.buffer = buffer
-        self.struct = Struct(VQueueUsedElement.format)
+        self.struct = Struct(VRingUsedElement.format)
+
+    @staticmethod
+    def create_used_element(buff):
+        used_element = VRingUsedElement(buff)
+        used_element.id = 0
+        used_element.length = 0
+        return used_element
 
     @property
     def id(self):
@@ -268,7 +386,7 @@ class VQueueUsedElement(object):
 
     @staticmethod
     def byte_size():
-        return calcsize(VQueueUsedElement.format)
+        return calcsize(VRingUsedElement.format)
 
     def _unpack(self):
         return self.struct.unpack(self.buffer)
@@ -277,27 +395,47 @@ class VQueueUsedElement(object):
         offset = calcsize(prefix)
         pack_into(field_format, self.buffer, offset, value)
 
+    def __str__(self):
+        return 'id={}, length={}'.format(self.id, self.length)
 
-class VQueueUsed(object):
-    format = 'H H {0:d}x H'
+
+class VRingUsed(object):
+    format = 'H H {:d}x'
 
     def __init__(self, buffer, size):
         self.buffer = buffer
         self.size = size
-        used_elem_size = VQueueUsedElement.byte_size()
-        self.struct = Struct(VQueueUsed.format.format(used_elem_size*size))
-        elem_buff = buffer[4:-2]
-        self.used_elements = [VQueueUsedElement(elem_buff[i*used_elem_size:used_elem_size*(i + 1)]) for i in range(size)]
+        used_elem_size = VRingUsedElement.byte_size()
+        self.struct = Struct(VRingUsed.format.format(used_elem_size*size))
+        elem_buff = buffer[4:]
+        self.rings = [VRingUsedElement.create_used_element(elem_buff[i*used_elem_size:used_elem_size*(i + 1)]) for i in range(size)]
 
+    @property
     def flags(self):
         return self._unpack()[0]
 
+    @flags.setter
+    def flags(self, flags):
+        self._pack_into_buffer(flags, 'H')
+
     @property
-    def idx(self):
+    def index(self):
         return self._unpack()[1]
+
+    @index.setter
+    def index(self, index):
+        self._pack_into_buffer(index, 'H', 'H')
+
+    def _pack_into_buffer(self, value, field_format, prefix=''):
+        offset = calcsize(prefix)
+        pack_into(field_format, self.buffer, offset, value)
 
     def __str__(self):
         return 'size={} buffer_size={} format={}'.format(self.size, len(self.buffer), self.struct.format)
 
     def _unpack(self):
         return self.struct.unpack(self.buffer)
+
+    @staticmethod
+    def byte_size(queue_size):
+        return calcsize(VRingUsed.format.format(VRingUsedElement.byte_size()*queue_size))

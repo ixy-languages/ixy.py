@@ -7,6 +7,8 @@ class IxyDevice(ABC):
         self.driver_name = driver_name
         self.num_rx_queues = num_rx_queues
         self.num_tx_queues = num_tx_queues
+        self.rx_bytes = 0
+        self.rx_pkts = 0
         self._initialize_device()
 
     @abstractmethod
