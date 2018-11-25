@@ -50,6 +50,10 @@ class Mempool(object):
             log.warning('No memory buffers left')
         return self._buffers.pop()
 
+    def get_buffers(self, num_buffers):
+        num = num_buffers if num_buffers <= len(self._buffers) else len(self._buffers)
+        return [self.get_buffer() for _ in range(num)]
+
     def free_buffer(self, buffer):
         self._buffers.append(buffer)
 

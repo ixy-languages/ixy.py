@@ -13,6 +13,7 @@ from ixypy.virtio.structures import VRing, VQueue, VirtioNetworkControl, Promisc
 from ixypy.ixy import IxyDevice
 from ixypy.virtio.types import *
 from ixypy.register import Register
+from ixypy.virtio.exception import VirtioException
 
 
 def is_running_as_root():
@@ -72,9 +73,6 @@ class VirtIo(IxyDevice):
     def get_link_speed(self):
         return 1000
 
-    def get_stats(self):
-        pass
-
     def rx_batch(self, buffs):
         vq = self.rx_queue
         buff_indx = 0
@@ -92,8 +90,8 @@ class VirtIo(IxyDevice):
             buf = vq.virtual_addresses[used_element.id]
             buf.size = used_element.length
             buffs[i] = buf
-            self.rx_bytes += buf.size
-            self.rx_pkts += 1
+            self.stats.rx_bytes += buf.size
+            self.stats.rx_pkts += 1
         for index, desc in vq.vring.descriptors:
             if desc.address != 0:
                 continue
@@ -113,31 +111,42 @@ class VirtIo(IxyDevice):
             self._notify_queue(0)
         return buff_indx
 
-    def tx_batch(self, buffers):
+    def tx_batch(self, buffers, queue_id=1):
         vq = self.tx_queue
-        while vq.used_last_index != vq.ring.used.index:
+        while vq.used_last_index != vq.vring.used.index:
+            log.debug('Freeing sent buffers')
             used_element = vq.vring.used.rings[vq.used_last_index % vq.vring.size]
             desc = vq.vring.descriptors[used_element.id]
             desc.address = 0
             desc.length = 0
+            log.debug('Freeing buffer %d', used_element.id)
             vq.mempool.free_buffer(vq.virtual_addresses[used_element.id])
             vq.used_last_index += 1
+        # log.debug('Sending buffers')
         buffer_index = 0
         index = 0
-        for buf_idx, buffer in enumerate(buffers):
-            index, desc = vq.get_free_descriptor()
-            self.tx_bytes += buffer.size
-            self.tx_pkts += 1
-            vq.virtual_addresses[index] = buffer
-            self.net_hdr.to_buffer(buffer.head_room_buffer[-len(self.net_hdr):])
+        for buffer in buffers:
+            try:
+                index, desc = vq.get_free_descriptor()
+            except VirtioException:
+                # log.exception('no free descriptor')
+                # raise ValueError()
+                break
+            else:
+                self.stats.tx_bytes += buffer.size
+                self.stats.tx_pkts += 1
+                vq.virtual_addresses[index] = buffer
+                self.net_hdr.to_buffer(buffer.head_room_buffer[-len(self.net_hdr):])
 
-            desc.length = buffer.size + len(self.net_hdr)
-            offset = buffer.data_offset - len(self.net_hdr)
-            desc.address = buffer.physical_address + offset
-            desc.flags = 0
-            desc.next_descriptor = 0
-            vq.vring.available.rings[index] = index
-        vq.vring.available.index = buffer_index
+                desc.length = buffer.size + len(self.net_hdr)
+                offset = buffer.data_offset - len(self.net_hdr)
+                desc.address = buffer.physical_address + offset
+                desc.flags = 0
+                desc.next_descriptor = 0
+                vq.vring.available.rings[index] = index
+                buffer_index += 1
+        log.debug("Available index %d", vq.vring.available.index)
+        vq.vring.available.index = vq.vring.available.index + buffer_index
         self._notify_queue(1)
         return buffer_index
 
@@ -228,17 +237,19 @@ class VirtIo(IxyDevice):
         log.debug('Setting up queue %d', index)
         self._create_virt_queue(index)
         max_queue_size = self._max_queue_size()
-        notify_offset = self._notify_offset()
         virt_queue_mem_size = VRing.byte_size(max_queue_size, 4096)
         log.debug('max queue size: %d', max_queue_size)
-        log.debug('notify offset: %d', notify_offset)
         log.debug('queue size in bytes: %d', virt_queue_mem_size)
         mem = DmaMemory(virt_queue_mem_size)
         log.debug('Allocated %s', mem)
         self._set_physical_address(mem.physical_address)
+        notify_offset = self._notify_offset()
+        log.debug('notify offset: %d', notify_offset)
+
         # virtual queue initialization
         vring = VRing(memoryview(mem), max_queue_size)
-        vqueue = VQueue(vring, notify_offset, Mempool.allocate(max_queue_size * 4, 2048)) if mempool else VQueue(vring, notify_offset)
+        mempool_size = max_queue_size if index == 2 else max_queue_size * 4
+        vqueue = VQueue(vring, notify_offset, Mempool.allocate(mempool_size, 2048)) if mempool else VQueue(vring, notify_offset)
         vqueue.disable_interrupts()
         return vqueue
 

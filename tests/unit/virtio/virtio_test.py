@@ -12,4 +12,4 @@ def test_virtio():
 
     configuration = 'vendor_id={:02X} device_id={:02X}'.format(pci_config.vendor_id, pci_config.device_id)
     print('\n' + str(pci_config))
-    vr = VirtIo(device)
+    # vr = VirtIo(device)

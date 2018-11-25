@@ -1,4 +1,6 @@
 from abc import ABC, abstractmethod
+import logging as log
+from ixypy.stats import Stats
 
 
 class IxyDevice(ABC):
@@ -7,8 +9,7 @@ class IxyDevice(ABC):
         self.driver_name = driver_name
         self.num_rx_queues = num_rx_queues
         self.num_tx_queues = num_tx_queues
-        self.rx_bytes = 0
-        self.rx_pkts = 0
+        self.stats = Stats(pci_address=pci_device.address)
         self._initialize_device()
 
     @abstractmethod
@@ -23,14 +24,19 @@ class IxyDevice(ABC):
     def set_promisc(self):
         pass
 
-    @abstractmethod
     def get_stats(self):
-        pass
+        return self.stats
 
     @abstractmethod
-    def tx_batch(self):
+    def tx_batch(self, buffers, queue_id=0):
         pass
 
     @abstractmethod
     def rx_batch(self):
         pass
+
+    def tx_batch_busy_wait(self, pkt_buffs, queue_id=0):
+        num_sent = 0
+        while num_sent != len(pkt_buffs):
+            # log.debug('Sending %d out of %d', num_sent, len(pkt_buffs))
+            num_sent += self.tx_batch(pkt_buffs[num_sent:], queue_id)

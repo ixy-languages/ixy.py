@@ -1,5 +1,7 @@
 - hosts: all
   gather_facts: False
+  vars:
+    python_version: "3.6.7"
 
   tasks:
   - name: install python 2
@@ -17,27 +19,46 @@
         update_cache: yes
         cache_valid_time: 86400
 
-    - name: Add additional repositories
-      become: True
-      apt_repository:
-        repo: ppa:jonathonf/python-3.6
-        state: present
+    # - name: Add additional repositories
+    #   become: True
+    #   apt_repository:
+    #     repo: ppa:jonathonf/python-3.6
+    #     state: present
 
     - name: Install tools
       become: True
       apt:
         name: "{{ item }}"
-        update_cache: True
+        # update_cache: True
       with_items:
-        - tree
         - make
-        - python3.6
-        - python3.6-dev
-        - python3.6-venv
-        - python3.6-gdbm
-        - git
-        - build-essential
         - cmake
+        - build-essential
+        - libssl-dev
+        - zlib1g-dev
+        - libbz2-dev
+        - libreadline-dev
+        - libsqlite3-dev
+        - wget
+        - curl
+        - llvm
+        - libncurses5-dev
+        - libncursesw5-dev
+        - xz-utils
+        - tk-dev
+        - pciutils
+        - vim
+        - git
+
+    - name: Install Python3
+      become: True
+      shell: |
+        wget https://www.python.org/ftp/python/3.6.7/Python-3.6.7.tgz
+        tar xvf Python-3.6.7.tgz
+        cd Python-3.6.7
+        ./configure --enable-optimizations
+        make -j8
+        sudo make altinstall
 
     - name: Install pypy3
       become: True
@@ -62,5 +83,22 @@
         executable: pip3
       with_items:
         - tox
+        - pytest
+        - cython
 
-# https://bitbucket.org/pypy/pypy/downloads/pypy3-v6.0.0-linux32.tar.bz2
+    # - name: Checkout ixy
+    #   become: True
+    #   git:
+    #     repo: https://github.com/emmericp/ixy
+    #     dest: /home/vagrant/ixy
+
+    - name: Build ixy
+      become: True
+      shell: |
+        sudo -u vagrant git clone https://github.com/emmericp/ixy /home/vagrant/ixy
+        cd /home/vagrant/ixy
+        if dmidecode -t 0 | grep VirtualBox ; then
+          git checkout virtualbox-workarounds
+        fi
+        sudo -u vagrant cmake .
+        sudo -u vagrant make
