@@ -73,6 +73,8 @@ def init_mempool():
         cs = calc_ip_checksum(buff.data_buffer[14:])
         struct.pack_into('H', buff.data_buffer, 24, cs)
         buffs.append(buff)
+    for buffer in buffs:
+        mempool.free_buffer(buffer)
     return mempool
 
 
