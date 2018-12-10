@@ -69,6 +69,7 @@ class IxgbeDevice(IxyDevice):
             raise ValueError('Number of queue entries must be a power of 2, actual {}'.format(queue.num_entries))
         for entry in range(queue.num_entries):
             # TODO ALlocate buffers
+
             pass
         # Enable queue and wait if necessary
         self.reg.set_flags(types.IXGBE_RXDCTL(queue.identifier), types.IXGBE_RXDCTL_ENABLE)

@@ -1,8 +1,9 @@
 # IDE
 .idea/
-
+*.swp
 # Infrastructure
 .vagrant/
+
 
 # Cython
 memory.c
