@@ -1,9 +1,14 @@
 class Queue(object):
+    def __init__(self, num_entries, identifier):
+        self.num_entries = num_entries
+        self.identifier = identifier
 
-    def __init__(self, count):
-        self.count = count
-        self.index = 0
 
 class RxQueue(Queue):
-    def __init__(self, count):
-        super().__init__(count)
+    def __init__(self, num_entries, identifier, memory):
+        super().__init__(num_entries, identifier)
+
+
+class TxQueue(Queue):
+    def __init__(self, num_entries, identifier, memory):
+        super().__init__(num_entries, identifier)

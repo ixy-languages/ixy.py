@@ -47,6 +47,13 @@ class MmapRegister(object):
     def set(self, offset, value):
         pack_into('I', self.mem_buffer, offset, value)
 
+    def set_flags(self, offset, flags):
+        new_value = self.get(offset) | flags
+        self.set(offset, new_value)
+
+    def clear_flags(self, offset, flags):
+        pass
+
     def get(self, offset):
         unpack_from('I', self.mem_buffer, offset)
 
