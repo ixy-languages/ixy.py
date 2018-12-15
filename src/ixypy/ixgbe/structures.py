@@ -75,9 +75,45 @@ class RxDescriptorWriteback(object):
         self.buffer = buffer
 
 
-class RxDescriptorWritebackLower(object):
+class RxWbHsRss(object):
+    def __init__(self, pkt_info, hdr_info):
+        self.pkt_info = pkt_info
+        self.hdr_info = hdr_info
+
+
+class RxDescriptorWritebackLower(IxgbeStruct):
+    # Low dword
+    hs_rss_fmt = 'H H'
+    lo_dword_fmt = 'I {}'.format(hs_rss_fmt)
+    # High dword
+    csum_ip = 'H H'
+    hi_dword_fmt = 'I {}'.format(csum_ip)
+
     def __init__(self, buffer):
-        self.lo_dword = Struct('')
+        super().__init__(buffer, '{} {}'.format(self.lo_dword_fmt, self.hi_dword_fmt))
+        self.lo_dword = Struct(self.lo_dword_fmt)
+        self.hi_dword = Struct(self.hi_dword_fmt)
+
+    def unpack_lo_dword(self):
+        return self.lo_dword.unpack_from(self.buffer, 0)
+
+    @property
+    def data(self):
+        return self.unpack_lo_dword()[0]
+
+    @data.setter
+    def data(self, data):
+        self._pack_into(data, 'Q')
+
+    @property
+    def hs_rss(self):
+        lo_dword = self.unpack_lo_dword()
+        return RxWbHsRss(lo_dword[1], lo_dword[2])
+
+    @hs_rss.setter
+    def hs_rss(self, hs_rss):
+        offset = calcsize('Q')
+        pack_into(self.hs_rss_fmt, self.buffer, offset, hs_rss.pkt_info, hs_rss.hdr_info)
 
 
 class RxDescriptorWritebackUpper(object):
