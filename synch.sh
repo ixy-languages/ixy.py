@@ -19,6 +19,7 @@ OPTIND=1         # Reset in case getopts has been used previously in the shell.
 # Initialize script variables
 WATCH="."
 VERBOSE=1
+PORT=22
 
 # the wrsync
 echo "wrsync v1.0 - watch and rsync"
@@ -30,11 +31,12 @@ function show_help {
 	echo "-v 			set verbose"
 	echo "-s 			set silent mode"
 	echo "-w PATH  		watch PATH (by default, it will watch current path"
+    echo "-p            ssh port"
 	echo "DESTINATION 	in rsync form, that is SERVER:PATH"
 }
 
 # option parsing
-while getopts ":hvsw:" opt; do
+while getopts ":hvswp:" opt; do
 	case "$opt" in
 		h)
 			show_help
@@ -47,6 +49,8 @@ while getopts ":hvsw:" opt; do
 		w)	WATCH="$OPTARG"
 			# watch a different path than the current one
 			;;
+        p) PORT="$OPTARG"
+            ;;
 		\?)
       		echo "Invalid option: -$OPTARG" >&2
       		show_help
@@ -67,14 +71,14 @@ fi
 
 # This is the real deal.
 # watch...
-echo "Watch '$WATCH' and sync with '$DEST'"
+echo "Watch '$WATCH' and sync with '$DEST:$PORT'"
 fswatch -e "\.tox" -e ".*___.*" -e "\.hg" -e "\.git" -e "hg" -e "vagrant" $WATCH |\
 	while read file
 	do
 		# and rsync everything!
 		echo "$file modified. Sync to $DEST"
 		echo "$ rsync -azvq $WATCH ${DEST}"
-		rsync -azvq $WATCH ${DEST}
+		rsync -azvq -e "ssh -p $PORT" $WATCH ${DEST}
 #		echo "$DEST/$file sync completed"
 		echo "$WATCH AND $DEST rsync completed"
 	done
@@ -88,7 +92,7 @@ inotifywait -r -m -e close_write --format '%w%f' . |\
 	while read file
 	do
 		echo $file
-		rsync -azvq $file ${DEST}/$file
+		rsync -azvq -e "ssh -p $PORT" $file ${DEST}/$file
 		echo -n 'Completed at '
 		date
 		done
