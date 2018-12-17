@@ -1,9 +1,13 @@
 from ixypy.virtio.virtio_device import VirtIo
-from ixypy.pci import PCIDevice, PCIAddress
+from ixypy.ixgbe.device import IxgbeDevice
+from ixypy.pci import PCIDevice, PCIAddress, PCIVendor
 from ixypy.mempool import Mempool
+from ixypy.stats import Stats
 
+import argparse
 import logging as log
 import struct
+import time
 
 BUFFER_COUNTS = 2048
 PKT_SIZE = 60
@@ -72,15 +76,42 @@ def init_mempool():
     return mempool
 
 
-def device():
-    address = PCIAddress.from_address_string('0000:00:08.0')
+def device(address_string):
+    address = PCIAddress.from_address_string(address_string)
     device = PCIDevice(address)
+    if device.vendor == PCIVendor.intel:
+        return IxgbeDevice(device)
     return VirtIo(device)
 
 
 if __name__ == '__main__':
-    mempool = init_mempool()
-    dev = device()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('address', help='NIC Pci address e.g. 0000:00:08.0', type=str)
+    args = parser.parse_args()
 
+    mempool = init_mempool()
+    dev = device(args.address)
+
+    stats_old = Stats(dev)
+    stats_new = Stats(dev)
+    counter = 0
+    last_stats_printed = time.monotonic()
+
+    seq_num = 0
     while True:
-        pass
+        log.info("Looping")
+        buffers = mempool.get_buffers(BATCH_SIZE)
+        for buffer in buffers:
+            data_buffer = buffer.data_buffer
+            struct.pack_into('I', data_buffer, PKT_SIZE-4, seq_num)
+            seq_num += 1
+
+        dev.tx_batch_busy_wait(buffers)
+
+        current_time = time.monotonic()
+        if current_time - last_stats_printed > 1000 * 1000 * 1000:
+            log.info(dev.stats)
+            last_stats_printed = current_time
+            dev.get_stats(stats_new)
+            stats_old = stats_new
+            counter = 0
