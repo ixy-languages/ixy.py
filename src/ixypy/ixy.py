@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
 import logging as log
-from ixypy.stats import Stats
 
 
 class IxyDevice(ABC):
@@ -9,7 +8,6 @@ class IxyDevice(ABC):
         self.driver_name = driver_name
         self.num_rx_queues = num_rx_queues
         self.num_tx_queues = num_tx_queues
-        self.stats = Stats(pci_address=pci_device.address)
         self._initialize_device()
 
     @abstractmethod
