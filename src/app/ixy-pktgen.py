@@ -9,6 +9,10 @@ import logging as log
 import struct
 import time
 
+log.basicConfig(level=log.DEBUG,
+                    format='%(asctime)s %(levelname)-8s %(message)s',
+                    datefmt='%a, %d %b %Y %H:%M:%S')
+
 BUFFER_COUNTS = 2048
 PKT_SIZE = 60
 BATCH_SIZE = 64
@@ -79,9 +83,10 @@ def init_mempool():
 def device(address_string):
     address = PCIAddress.from_address_string(address_string)
     device = PCIDevice(address)
-    if device.vendor == PCIVendor.intel:
-        return IxgbeDevice(device)
-    return VirtIo(device)
+    log.info("Vendor = %s", device.vendor())
+    if device.vendor == PCIVendor.virt_io:
+        return VirtIo(device)
+    return IxgbeDevice(device)
 
 
 if __name__ == '__main__':

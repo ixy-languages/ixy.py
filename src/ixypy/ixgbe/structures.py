@@ -16,7 +16,8 @@ class RxQueue(Queue):
         self.descriptors = self._get_descriptors()
 
     def _get_descriptors(self):
-        desc_size = RxDescriptor.byte_size
+        desc_size = RxDescriptor.byte_size()
+        import pdb; pdb.set_trace()
         return [RxDescriptor(self.memory[i*desc_size:desc_size*(i+1)]) for i in range(self.num_descriptors)]
 
 
@@ -44,6 +45,7 @@ class IxgbeStruct(object):
     @classmethod
     def byte_size(cls):
         return calcsize(cls.data_format)
+
 
 
 class TxDescriptorRead(IxgbeStruct):
@@ -109,12 +111,13 @@ class TxDescriptorWriteback(IxgbeStruct):
 
 
 class TxDescriptor(IxgbeStruct):
-    data_format = '{} {}'.format(TxDescriptorRead.data_format, TxDescriptorWriteback.data_format)
-
     def __init__(self, buffer):
-        super().__init__(buffer, self.data_format)
-        self.read = TxDescriptorRead(buffer[:TxDescriptorRead.byte_size()])
-        self.writeback = TxDescriptorWriteback(buffer[TxDescriptorRead.byte_size():TxDescriptorWriteback.byte_size()])
+        self.read = TxDescriptorRead(buffer)
+        self.writeback = TxDescriptorWriteback(buffer)
+
+    @staticmethod
+    def byte_size():
+        return 16
 
 
 class RxDescriptorRead(IxgbeStruct):
@@ -157,64 +160,110 @@ class RxWbCsumIp(object):
         self.csum = csum
 
 
-class RxDescriptorWritebackLower(IxgbeStruct):
-    # Low dword
-    hs_rss_fmt = 'H H'
-    data_fmt = 'I'
-    lo_dword_fmt = '{} {}'.format(data_fmt, hs_rss_fmt)
-    # High dword
-    csum_ip_fmt = 'H H'
-    rss_fmt = 'I'
-    hi_dword_fmt = '{} {}'.format(rss_fmt, csum_ip_fmt)
-    data_format = '{} {}'.format(lo_dword_fmt, hi_dword_fmt)
+class RxDescWbLoDwordHsRss(IxgbeStruct):
+    data_format = 'H H'
 
     def __init__(self, buffer):
-        super().__init__(buffer, '{} {}'.format(self.lo_dword_fmt, self.hi_dword_fmt))
-        self.lo_dword = Struct(self.lo_dword_fmt)
-        self.hi_dword = Struct(self.hi_dword_fmt)
+        super().__init__(buffer, self.data_fmt)
 
-    def unpack_lo_dword(self):
-        return self.lo_dword.unpack_from(self.buffer, 0)
+    @property
+    def pkt_info(self):
+        return self._unpack()[0]
 
-    def unpack_hi_dword(self):
-        return self.hi_dword.unpack_from(self.buffer, self.lo_dword.size)
+    @pkt_info.setter
+    def pkt_info(self, pkt_info):
+        self._pack_into(pkt_info, 'H')
+
+    @property
+    def hdr_info(self):
+        return self._unpack()[1]
+
+    @hdr_info.setter
+    def hdr_info(self, hdr_info):
+        self._pack_into(hdr_info, 'H', 'H')
+
+
+class RxDescWbLoDwordData(IxgbeStruct):
+    data_format = 'I'
+
+    def __init__(self, buffer):
+        super().__init__(buffer, self.data_format)
 
     @property
     def data(self):
-        return self.unpack_lo_dword()[0]
+        return self._unpack()[0]
 
     @data.setter
     def data(self, data):
-        self._pack_into(data, self.data_fmt)
+        self._pack_into(data, self.data_format)
 
-    @property
-    def hs_rss(self):
-        lo_dword = self.unpack_lo_dword()
-        return RxWbHsRss(lo_dword[1], lo_dword[2])
 
-    @hs_rss.setter
-    def hs_rss(self, hs_rss):
-        offset = calcsize(self.data_fmt)
-        pack_into(self.hs_rss_fmt, self.buffer, offset, hs_rss.pkt_info, hs_rss.hdr_info)
+class RxDescWbLoDword(object):
+    def __init__(self, buffer):
+        self.data = RxDescWbLoDwordData(buffer)
+        self.hs_rss = RxDescWbLoDwordHsRss(buffer)
+
+    @staticmethod
+    def byte_size():
+        return 4
+
+
+class RxDescWbHiDwordRss(IxgbeStruct):
+    data_format = 'I'
+
+    def __init__(self, buffer):
+        super().__init__(buffer, self.data_format)
 
     @property
     def rss(self):
-        self.unpack_hi_dword()[0]
+        return self._unpack()[0]
 
     @rss.setter
     def rss(self, rss):
-        offset = self.lo_dword.size
-        pack_into(self.rss_fmt, self.buffer, offset, rss)
+        self._pack_into(rss, self.data_format)
+
+
+class RxDescWbHiDwordCsumIp(IxgbeStruct):
+    data_format = 'H H'
+
+    def __init__(self, buffer):
+        super().__init__(buffer, self.data_format)
 
     @property
-    def csum_ip(self):
-        hi_dword = self.unpack_hi_dword()
-        return RxWbCsumIp(hi_dword[1], hi_dword[2])
+    def ip_id(self):
+        return self._unpack()[0]
 
-    @csum_ip.setter
-    def csum_ip(self, csum_ip):
-        offset = calcsize('{} {}'.format(self.lo_dword.format, self.rss_fmt))
-        pack_into(self.csum_ip_fmt, self.buffer, offset, csum_ip.ip_id, csum_ip.csum)
+    @ip_id.setter
+    def ip_id(self, ip_id):
+        self._pack_into(ip_id, 'H')
+
+    @property
+    def csum(self):
+        return self._unpack()[1]
+
+    @csum.setter
+    def csum(self, csum):
+        self._pack_into(csum, 'H', 'H')
+
+
+class RxDescWbHiDword(object):
+    def __init_(self, buffer):
+        self.rss = RxDescWbHiDwordRss(buffer)
+        self.csum_ip = RxDescWbHiDwordCsumIp(buffer)
+
+    @staticmethod
+    def byte_size():
+        return 4
+
+
+class RxDescriptorWritebackLower(object):
+    def __init__(self, buffer):
+        self.lo_dword = RxDescWbLoDword(buffer[:RxDescWbLoDword.byte_size()])
+        self.hi_dword = RxDescWbHiDword(buffer[RxDescWbLoDword.byte_size():])
+
+    @staticmethod
+    def byte_size():
+        return RxDescWbLoDword.byte_size()
 
 
 class RxDescriptorWritebackUpper(IxgbeStruct):
@@ -248,21 +297,19 @@ class RxDescriptorWritebackUpper(IxgbeStruct):
         self._pack_into(vlan, 'H', 'I H')
 
 
-class RxDescriptorWriteback(IxgbeStruct):
+class RxDescriptorWriteback(object):
     """ Advanced Descriptor writeback Sec. 7.1.6.2 """
-    data_format = '{} {}'.format(RxDescriptorWritebackLower.data_format, RxDescriptorWritebackUpper.data_format)
-
     def __init__(self, buffer):
-        super().__init__(buffer, self.data_format)
         self.lower = RxDescriptorWritebackLower(buffer[:RxDescriptorWritebackLower.byte_size()])
         self.upper = RxDescriptorWritebackUpper(buffer[RxDescriptorWritebackLower.byte_size():RxDescriptorWritebackUpper.byte_size()])
 
 
-class RxDescriptor(IxgbeStruct):
+class RxDescriptor(object):
     """Advanced Receive Descriptor Sec. 7.1.6"""
-    data_format = '{} {}'.format(RxDescriptorRead.data_format, RxDescriptorWriteback.data_format)
-
     def __init__(self, buffer):
-        super().__init__(buffer, self.data_format)
-        self.read = RxDescriptorRead(buffer[:RxDescriptorRead.byte_size()])
-        self.writeback = RxDescriptorWriteback(buffer[RxDescriptorRead.byte_size():RxDescriptorWriteback.byte_size()])
+        self.read = RxDescriptorRead(buffer)
+        self.writeback = RxDescriptorWriteback(buffer)
+
+    @staticmethod
+    def byte_size():
+        return 16

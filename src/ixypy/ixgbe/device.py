@@ -19,7 +19,7 @@ class IxgbeDevice(IxyDevice):
     TX_DESCRIPTOR_SIZE = 16
     TX_CLEAN_BATCH = 32
 
-    def __init__(self, pci_device, num_rx_queues, num_tx_queues):
+    def __init__(self, pci_device, num_rx_queues=1, num_tx_queues=1):
         self.resource = None
         self.tx_queues = None
         self.rx_queues = None
@@ -103,6 +103,7 @@ class IxgbeDevice(IxyDevice):
         mempool_size = self.NUM_RX_QUEUE_ENTRIES + self.NUM_TX_QUEUE_ENTRIES
         mempool = Mempool.allocate(4096 if mempool_size < 4096 else mempool_size)
         queue.mempool = mempool
+        import pdb; pdb.set_trace()
         if queue.num_descriptors & (queue.num_descriptors - 1) != 0:
             raise ValueError('Number of queue entries must be a power of 2, actual {}'.format(queue.num_descriptors))
         for descriptor in queue.descriptors:
@@ -171,10 +172,10 @@ class IxgbeDevice(IxyDevice):
         # Sec 7.1.9 - Set up descriptor ring
         ring_size = self.NUM_RX_QUEUE_ENTRIES * self.RX_DESCRIPTOR_SIZE
         mem = DmaMemory(ring_size)
-        self.reg.set(types.IXGBE_RDBAL(index), mem.physical_address)
+        self.reg.set(types.IXGBE_RDBAL(index), mem.physical_address & 0xffffffff)
         self.reg.set(types.IXGBE_RDBAH(index), mem.physical_address >> 32)
         self.reg.set(types.IXGBE_RDLEN(index), ring_size)
-        self.info('RX ring %d using %s', index, mem)
+        log.info('RX ring %d using %s', index, mem)
 
         # Set ring to empty
         self.reg.set(types.IXGBE_RDH(index), 0)
@@ -223,7 +224,7 @@ class IxgbeDevice(IxyDevice):
 
         # Rquired when not using DCB/VTd
         self.reg.set(types.IXGBE_DTXMXSZRQ, 0xFFFF)
-        self.reg.clear_flags()
+        self.reg.clear_flags(types.IXGBE_RTTDCS, types.IXGBE_RTTDCS_ARBDIS)
 
         self.tx_queues = [
             self.init_tx_queue(index) for index in range(self.num_tx_queues)
@@ -399,6 +400,21 @@ class IxgbeDevice(IxyDevice):
 
         # Negotiate link
         self.reg.set_flags(types.IXGBE_AUTOC, types.IXGBE_AUTOC_AN_RESTART)
+
+    def init_statistict(self):
+        """
+        Sec. 4.6.7 - init rx
+        reset on read registers, just read them once
+        """
+        self._reset_stats()
+
+    def _reset_stats(self):
+        self.reg.get(types.IXGBE_GPRC)
+        self.reg.get(types.IXGBE_GPTC)
+        self.reg.get(types.IXGBE_GORCL)
+        self.reg.get(types.IXGBE_GORCH)
+        self.reg.get(types.IXGBE_GOTCL)
+        self.reg.get(types.IXGBE_GOTCH)
 
     def disable_interrupts(self):
         """Sec 4.6.3.1 - Disable all interrupts."""

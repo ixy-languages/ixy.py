@@ -45,17 +45,18 @@ class MmapRegister(object):
         self.mem_buffer = mem_buffer
 
     def set(self, offset, value):
-        pack_into('I', self.mem_buffer, offset, value)
+        # log.debug('Setting value=%d offset=%d', value, offset)
+        pack_into('I', self.mem_buffer, offset, value & 0xFFFFFFFF)
 
     def set_flags(self, offset, flags):
         new_value = self.get(offset) | flags
         self.set(offset, new_value)
 
     def clear_flags(self, offset, flags):
-        pass
+        self.set_flags(offset, ~flags)
 
     def get(self, offset):
-        unpack_from('I', self.mem_buffer, offset)
+        return unpack_from('I', self.mem_buffer, offset)[0]
 
     def wait_clear(self, offset, mask):
         self._wait_until_set(offset, mask, 0)
