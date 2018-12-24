@@ -1,5 +1,6 @@
 import time
 import logging as log
+from functools import reduce
 
 from memory import DmaMemory
 from ixypy.mempool import Mempool
@@ -35,12 +36,11 @@ class IxgbeDevice(IxyDevice):
         if self.pci_device.has_driver():
             log.info('Unbinding driver')
             self.pci_device.unbind_driver()
-        # self.rx_queues =
-        # self.tx_queues =
-        self.reg = MmapRegister(self.pci_device.map_resource())
+        self.reg = MmapRegister(memoryview(self.pci_device.map_resource()))
         self.reset_and_init()
 
     def reset_and_init(self):
+        import pdb; pdb.set_trace()
         log.info('Resetting device %s', self.pci_device.address)
         self.disable_interrupts()
         self.global_reset()
@@ -84,6 +84,7 @@ class IxgbeDevice(IxyDevice):
 
     def get_link_speed(self):
         links = self.reg.get(types.IXGBE_LINKS)
+        import pdb; pdb.set_trace()
         if links & types.IXGBE_LINKS_UP:
             return 0
         speed = links & types.IXGBE_LINKS_SPEED_82599
@@ -103,7 +104,6 @@ class IxgbeDevice(IxyDevice):
         mempool_size = self.NUM_RX_QUEUE_ENTRIES + self.NUM_TX_QUEUE_ENTRIES
         mempool = Mempool.allocate(4096 if mempool_size < 4096 else mempool_size)
         queue.mempool = mempool
-        import pdb; pdb.set_trace()
         if queue.num_descriptors & (queue.num_descriptors - 1) != 0:
             raise ValueError('Number of queue entries must be a power of 2, actual {}'.format(queue.num_descriptors))
         for descriptor in queue.descriptors:
@@ -210,7 +210,7 @@ class IxgbeDevice(IxyDevice):
         txdctl = txdctl & ~(0x3F | (0x3F << 8) | (0x3F << 16))
         txdctl = txdctl | (36 | (8 << 8) | (4 << 16))
         self.reg.set(types.IXGBE_TXDCTL(index), txdctl)
-        queue = TxQueue(self.NUM_TX_QUEUE_ENTRIES, index, memoryview(mem))
+        queue = TxQueue(memoryview(mem), self.NUM_TX_QUEUE_ENTRIES, index)
         return queue
 
     def init_tx(self):
@@ -282,7 +282,7 @@ class IxgbeDevice(IxyDevice):
             queue.index = rx_index
         return buffers
 
-    def tx_batch(self, queue_id, buffers):
+    def tx_batch(self, buffers, queue_id):
         if not 0 <= queue_id < len(self.rx_queues):
             raise IndexError('Queue id<{}> not in [0, {}]'.format(queue_id, len(self.rx_queues)))
         queue = self.tx_queues[queue_id]
@@ -308,67 +308,68 @@ class IxgbeDevice(IxyDevice):
             cleanable = current_index - clean_index
             if cleanable < 0:
                 cleanable = queue.num_descriptors + cleanable
-                if cleanable < self.TX_CLEAN_BATCH:
-                    break
+            if cleanable < self.TX_CLEAN_BATCH:
+                break
 
-                # Calculate the index of the last transcriptor in the clean batch
-                # We can't check all descriptors for performance reasons
-                cleanup_to = clean_index - self.TX_CLEAN_BATCH - 1
-                if cleanup_to >= queue.num_descriptors:
-                    cleanup_to -= queue.num_descriptors
-                descriptor = queue.descriptors[cleanup_to]
-                status = descriptor.writeback.status
+            # Calculate the index of the last transcriptor in the clean batch
+            # We can't check all descriptors for performance reasons
+            cleanup_to = clean_index + self.TX_CLEAN_BATCH - 1
+            if cleanup_to >= queue.num_descriptors:
+                cleanup_to -= queue.num_descriptors
+            descriptor = queue.descriptors[cleanup_to]
+            status = descriptor.writeback.status
 
-                # Hardware sets this flag as soon as it's sent out, we can give back all bufs in the batch back to the mempool
-                if (status & types.IXGBE_ADVTXD_STAT_DD) != 0:
-                    i = clean_index
-                    while True:
-                        pkt_buffer = queue.buffers[i]
+            # Hardware sets this flag as soon as it's sent out, we can give back all bufs in the batch back to the mempool
+            if (status & types.IXGBE_ADVTXD_STAT_DD) != 0:
+                i = clean_index
+                while True:
+                    pkt_buffer = queue.buffers[i]
+                    if mempool is None:
+                        mempool = Mempool.pools[pkt_buffer.mempool_id]
                         if mempool is None:
-                            mempool = Mempool.pools[pkt_buffer.mempool_id]
-                            if mempool is None:
-                                raise ValueError('Could not find mempool with id {}'.format(pkt_buffer.mempool_id))
-                        mempool.free_buffer(pkt_buffer)
-                        if i == cleanup_to:
-                            break
-                        i = self.wrap_ring(i, queue.num_descriptors)
-                    # Next descriptor to be cleaned up is one after the one we just cleaned
-                    clean_index = self.wrap_ring(cleanup_to, queue.num_descriptors)
-                else:
-                    """
-                    Clean the whole batch or nothing. This will leave some packets in the queue forever
-                    if you stop transmitting but tha's not a real concern
-                    """
-                    break
-                queue.clean_index = clean_index
-                sent = 0
-                for index, buff in enumerate(buffers):
-                    sent = index
-                    descriptor = queue.descriptors[current_index]
-                    next_index = self.wrap_ring(current_index, queue.num_descriptors)
-                    # We are full if the next index is the one we are trying to reclaim
-                    if clean_index == next_index:
+                            raise ValueError('Could not find mempool with id {}'.format(pkt_buffer.mempool_id))
+                    mempool.free_buffer(pkt_buffer)
+                    if i == cleanup_to:
                         break
+                    i = self.wrap_ring(i, queue.num_descriptors)
+                # Next descriptor to be cleaned up is one after the one we just cleaned
+                clean_index = self.wrap_ring(cleanup_to, queue.num_descriptors)
+            else:
+                """
+                Clean the whole batch or nothing. This will leave some packets in the queue forever
+                if you stop transmitting but tha's not a real concern
+                """
+                break
+            queue.clean_index = clean_index
 
-                    # Remember virual address to clean it up later
-                    queue.buffers[current_index] = buff
-                    queue.index = self.wrap_ring(queue.index, queue.num_descriptors)
-                    # NIC reads from here
-                    descriptor.read.buffer_address = buff.physical_address + buff.data_offset
-                    # Alaways the same flags: One buffer (EOP), advanced data descriptor, CRC offload, data length
-                    buff_size = buff.size
-                    descriptor.read.cmd_type_len = cmd_type_flags | buff_size
-                    """
-                    No fancy offloading - only the total payload length
-                    implement offloading flags here:
-                        * ip checksum offloading is trivial: just set the offset
-                        * tcp/udp checksum offloading is more annoying, you have to precalculate the pseudo-header checksum
-                    """
-                    descriptor.read.olinfo_status = buff_size << types.IXGBE_ADVTXD_PAYLEN_SHIFT
-                    current_index = next_index
-                # Send out by advancing tail, i.e. pass control of the bus to the NIC
-                self.reg.set(types.IXGBE_TDT(queue_id), queue.index)
-                return sent
+        # Step 2: Send out as many of our packets as possible
+        sent = 0
+        for index, buff in enumerate(buffers):
+            sent += 1
+            descriptor = queue.descriptors[current_index]
+            next_index = self.wrap_ring(current_index, queue.num_descriptors)
+            # We are full if the next index is the one we are trying to reclaim
+            if clean_index == next_index:
+                break
+            # Remember virual address to clean it up later
+            queue.buffers[current_index] = buff
+            queue.index = self.wrap_ring(queue.index, queue.num_descriptors)
+            # NIC reads from here
+            descriptor.read.buffer_address = buff.physical_address + buff.data_offset
+            # Alaways the same flags: One buffer (EOP), advanced data descriptor, CRC offload, data length
+            buff_size = buff.size
+            descriptor.read.cmd_type_len = cmd_type_flags | buff_size
+            """
+            No fancy offloading - only the total payload length
+            implement offloading flags here:
+                * ip checksum offloading is trivial: just set the offset
+                * tcp/udp checksum offloading is more annoying, you have to precalculate the pseudo-header checksum
+            """
+            descriptor.read.olinfo_status = buff_size << types.IXGBE_ADVTXD_PAYLEN_SHIFT
+            current_index = next_index
+        # Send out by advancing tail, i.e. pass control of the bus to the NIC
+        self.reg.set(types.IXGBE_TDT(queue_id), queue.index)
+        return sent
 
     def wrap_ring(self, index, ring_size):
         return (index + 1) & (ring_size -1)
@@ -376,7 +377,7 @@ class IxgbeDevice(IxyDevice):
     def enable_dma(self):
         self.reg.set(types.IXGBE_DMATXCTL, types.IXGBE_DMATXCTL_TE)
 
-    def get_stats(self, stats):
+    def read_stats(self, stats):
         rx_packets = self.reg.get(types.IXGBE_GPRC)
         tx_packets = self.reg.get(types.IXGBE_GPTC)
         rx_bytes = self.reg.get(types.IXGBE_GORCL) + (self.reg.get(types.IXGBE_GORCH) << 32)

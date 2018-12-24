@@ -2,29 +2,29 @@ from struct import Struct, calcsize, pack_into, unpack_from
 
 
 class Queue(object):
-    def __init__(self, num_descriptors, identifier):
+    def __init__(self, memory, num_descriptors, identifier):
+        self.memory = memory
         self.num_descriptors = num_descriptors
+        self.buffers = [None]*num_descriptors
         self.identifier = identifier
         self.index = 0
+
+    def _get_descriptors(self, descriptor_class):
+        desc_size = descriptor_class.byte_size()
+        return [descriptor_class(self.memory[i*desc_size:desc_size*(i+1)]) for i in range(self.num_descriptors)]
 
 
 class RxQueue(Queue):
     def __init__(self, num_descriptors, identifier, memory):
-        super().__init__(num_descriptors, identifier)
-        self.memory = memory
-        self.buffers = []
-        self.descriptors = self._get_descriptors()
-
-    def _get_descriptors(self):
-        desc_size = RxDescriptor.byte_size()
-        import pdb; pdb.set_trace()
-        return [RxDescriptor(self.memory[i*desc_size:desc_size*(i+1)]) for i in range(self.num_descriptors)]
+        super().__init__(memory, num_descriptors, identifier)
+        self.descriptors = self._get_descriptors(RxDescriptor)
 
 
 class TxQueue(Queue):
-    def __init__(self, num_descriptors, identifier, memory):
-        super().__init__(num_descriptors, identifier)
+    def __init__(self, memory, num_descriptors, identifier):
+        super().__init__(memory, num_descriptors, identifier)
         self.clean_index = 0
+        self.descriptors = self._get_descriptors(TxDescriptor)
 
 
 class IxgbeStruct(object):
@@ -68,7 +68,7 @@ class TxDescriptorRead(IxgbeStruct):
 
     @cmd_type_len.setter
     def cmd_type_len(self, cmd_type_len):
-        self._pack_into(cmd_type_len, 'H', 'Q')
+        self._pack_into(cmd_type_len, 'I', 'Q')
 
     @property
     def olinfo_status(self):
@@ -76,7 +76,7 @@ class TxDescriptorRead(IxgbeStruct):
 
     @olinfo_status.setter
     def olinfo_status(self, olinfo_status):
-        self._pack_into(olinfo_status, 'H', 'Q H')
+        self._pack_into(olinfo_status, 'I', 'Q I')
 
 
 class TxDescriptorWriteback(IxgbeStruct):
@@ -103,7 +103,7 @@ class TxDescriptorWriteback(IxgbeStruct):
 
     @property
     def status(self):
-        self._unpack()[2]
+        return self._unpack()[2]
 
     @status.setter
     def status(self, status):
@@ -164,7 +164,7 @@ class RxDescWbLoDwordHsRss(IxgbeStruct):
     data_format = 'H H'
 
     def __init__(self, buffer):
-        super().__init__(buffer, self.data_fmt)
+        super().__init__(buffer, self.data_format)
 
     @property
     def pkt_info(self):
@@ -247,7 +247,7 @@ class RxDescWbHiDwordCsumIp(IxgbeStruct):
 
 
 class RxDescWbHiDword(object):
-    def __init_(self, buffer):
+    def __init__(self, buffer):
         self.rss = RxDescWbHiDwordRss(buffer)
         self.csum_ip = RxDescWbHiDwordCsumIp(buffer)
 

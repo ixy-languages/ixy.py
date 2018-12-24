@@ -97,14 +97,14 @@ if __name__ == '__main__':
     mempool = init_mempool()
     dev = device(args.address)
 
-    stats_old = Stats(dev)
-    stats_new = Stats(dev)
+    stats_old = Stats(dev.pci_device)
+    stats_new = Stats(dev.pci_device)
     counter = 0
     last_stats_printed = time.monotonic()
 
     seq_num = 0
     while True:
-        log.info("Looping")
+        # log.info("Looping")
         buffers = mempool.get_buffers(BATCH_SIZE)
         for buffer in buffers:
             data_buffer = buffer.data_buffer
@@ -114,9 +114,9 @@ if __name__ == '__main__':
         dev.tx_batch_busy_wait(buffers)
 
         current_time = time.monotonic()
-        if current_time - last_stats_printed > 1000 * 1000 * 1000:
-            log.info(dev.stats)
+        if current_time - last_stats_printed > 1:
+            dev.read_stats(stats_new)
+            stats_new.print_diff(stats_old, (current_time - last_stats_printed)*10**9)
             last_stats_printed = current_time
-            dev.get_stats(stats_new)
             stats_old = stats_new
-            counter = 0
+            counter += 1

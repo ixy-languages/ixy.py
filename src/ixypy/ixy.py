@@ -22,8 +22,9 @@ class IxyDevice(ABC):
     def set_promisc(self):
         pass
 
-    def get_stats(self):
-        return self.stats
+    @abstractmethod
+    def read_stats(self, stats):
+        pass
 
     @abstractmethod
     def tx_batch(self, buffers, queue_id=0):
@@ -35,6 +36,6 @@ class IxyDevice(ABC):
 
     def tx_batch_busy_wait(self, pkt_buffs, queue_id=0):
         num_sent = 0
-        while num_sent != len(pkt_buffs):
+        while num_sent < len(pkt_buffs):
             # log.debug('Sending %d out of %d', num_sent, len(pkt_buffs))
             num_sent += self.tx_batch(pkt_buffs[num_sent:], queue_id)
