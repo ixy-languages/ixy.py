@@ -83,7 +83,7 @@ cdef class DmaMemory:
     return virt_to_phys(self.virtual_address + offset)
 
   def __str__(self):
-    return 'DmaMemory(vaddr=0x{:02X}, phyaddr={:d}, size={:d})'.format(<uintptr_t>self.virtual_address, self.physical_address, self.size)
+    return 'DmaMemory(vaddr=0x{:02X}, phyaddr=0x{:02X}, size={:d})'.format(<uintptr_t>self.virtual_address, self.physical_address, self.size)
 
   @staticmethod
   cdef uint32_t _round_size(uint32_t size):

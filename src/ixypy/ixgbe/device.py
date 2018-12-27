@@ -10,6 +10,10 @@ from ixypy.register import MmapRegister
 from ixypy.ixgbe import types
 
 
+def to_hex(val):
+    return '{:02X}'.format(val)
+
+
 class IxgbeDevice(IxyDevice):
     MAX_QUEUES = 64
     MAX_RX_QUEUE_ENTRIES = 4096
@@ -40,7 +44,6 @@ class IxgbeDevice(IxyDevice):
         self.reset_and_init()
 
     def reset_and_init(self):
-        import pdb; pdb.set_trace()
         log.info('Resetting device %s', self.pci_device.address)
         self.disable_interrupts()
         self.global_reset()
@@ -50,6 +53,7 @@ class IxgbeDevice(IxyDevice):
         self._wait_for_eeprom()
         self._wait_for_dma_init()
 
+        import pdb; pdb.set_trace()
         self.init_link()
         self.init_statistict()
         self.init_rx()
@@ -84,7 +88,6 @@ class IxgbeDevice(IxyDevice):
 
     def get_link_speed(self):
         links = self.reg.get(types.IXGBE_LINKS)
-        import pdb; pdb.set_trace()
         if links & types.IXGBE_LINKS_UP:
             return 0
         speed = links & types.IXGBE_LINKS_SPEED_82599
@@ -99,6 +102,7 @@ class IxgbeDevice(IxyDevice):
             return 0
 
     def start_rx_queue(self, queue):
+        import pdb; pdb.set_trace()
         log.info('Starting RX queue %d', queue.identifier)
         # Mempool should be >= number of rx and tx descriptors
         mempool_size = self.NUM_RX_QUEUE_ENTRIES + self.NUM_TX_QUEUE_ENTRIES
@@ -109,7 +113,7 @@ class IxgbeDevice(IxyDevice):
         for descriptor in queue.descriptors:
             pkt_buf = mempool.get_buffer()
             if not pkt_buf:
-                raise ValueError('Coulde not allocate packet buffer')
+                raise ValueError('Could not allocate packet buffer')
             descriptor.read.pkt_addr = pkt_buf.physical_address + pkt_buf.data_offset
             descriptor.read.hdr_addr = 0
             queue.buffers.append(pkt_buf)
@@ -126,8 +130,9 @@ class IxgbeDevice(IxyDevice):
     def init_rx(self):
         """Sec 4.6.7"""
         # disable RX while configuring
+        # The datasheet also wants us to disable some crypto-offloading related rx paths (but we don't care about them)
         self.reg.clear_flags(types.IXGBE_RXCTRL, types.IXGBE_RXCTRL_RXEN)
-        self.reg.set(types.IXGBE_RXCTRL, types.IXGBE_RXCTRL_RXEN)
+        # self.reg.set(types.IXGBE_RXCTRL, types.IXGBE_RXCTRL_RXEN)
 
         # NO DCB or VT, just a single 128kb packet buffer
         self.reg.set(types.IXGBE_RXPBSIZE(0), types.IXGBE_RXPBSIZE_128KB)
@@ -147,7 +152,11 @@ class IxgbeDevice(IxyDevice):
         ]
 
         # Sec 4.6.7 - set magic bits
-        self.reg.set_flags(types.IXGBE_CTRL_EXT, types.IXGBE_CTRL_EXT_NS_DIS)
+        """
+        this flag probably refers to a broken feature: it's reserved and initialized as
+        '1' but it must be set to '0'
+        there isn't even a constant in ixgbe_types.h for this flag
+        """
         for index, _ in enumerate(self.rx_queues):
             self.reg.clear_flags(types.IXGBE_DCA_RXCTRL(index), 1 << 12)
 
@@ -172,7 +181,7 @@ class IxgbeDevice(IxyDevice):
         # Sec 7.1.9 - Set up descriptor ring
         ring_size = self.NUM_RX_QUEUE_ENTRIES * self.RX_DESCRIPTOR_SIZE
         mem = DmaMemory(ring_size)
-        self.reg.set(types.IXGBE_RDBAL(index), mem.physical_address & 0xffffffff)
+        self.reg.set(types.IXGBE_RDBAL(index), mem.physical_address)
         self.reg.set(types.IXGBE_RDBAH(index), mem.physical_address >> 32)
         self.reg.set(types.IXGBE_RDLEN(index), ring_size)
         log.info('RX ring %d using %s', index, mem)
@@ -401,6 +410,7 @@ class IxgbeDevice(IxyDevice):
 
         # Negotiate link
         self.reg.set_flags(types.IXGBE_AUTOC, types.IXGBE_AUTOC_AN_RESTART)
+        # the datasheet suggests waiting here, we will wait at a later point
 
     def init_statistict(self):
         """
@@ -425,7 +435,7 @@ class IxgbeDevice(IxyDevice):
         """Sec 4.6.3.2 - Global reset (software + link)."""
         self.reg.set(types.IXGBE_CTRL, types.IXGBE_CTRL_RST_MASK)
         self.reg.wait_clear(types.IXGBE_CTRL, types.IXGBE_CTRL_RST_MASK)
-        time.sleep(0.01)
+        time.sleep(0.1)
 
     def _wait_for_eeprom(self):
         """Sec 4.6.3.1 - Wait for EEPROM auto read completion."""

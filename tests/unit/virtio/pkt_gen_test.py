@@ -83,24 +83,24 @@ def device():
     return VirtIo(PCIDevice(address))
 
 
-def test_pkt_gen():
-    mempool = init_mempool()
-    dev = device()
-    counter = 0
-    last_stats_printed = time.monotonic()
+# def test_pkt_gen():
+    # mempool = init_mempool()
+    # dev = device()
+    # counter = 0
+    # last_stats_printed = time.monotonic()
 
-    seq_num = 0
-    while True:
-        log.info("Looping")
-        buffers = mempool.get_buffers(BATCH_SIZE)
-        for buffer in buffers:
-            data_buffer = buffer.data_buffer
-            struct.pack_into('I', data_buffer, PKT_SIZE-4, seq_num)
-            seq_num += 1
+    # seq_num = 0
+    # while True:
+        # log.info("Looping")
+        # buffers = mempool.get_buffers(BATCH_SIZE)
+        # for buffer in buffers:
+            # data_buffer = buffer.data_buffer
+            # struct.pack_into('I', data_buffer, PKT_SIZE-4, seq_num)
+            # seq_num += 1
 
-        dev.tx_batch_busy_wait(buffers)
+        # dev.tx_batch_busy_wait(buffers)
 
-        current_time = time.monotonic()
-        if current_time - last_stats_printed > 1000 * 1000 * 1000:
-            log.info(dev.stats)
-            last_stats_printed = current_time
+        # current_time = time.monotonic()
+        # if current_time - last_stats_printed > 1000 * 1000 * 1000:
+            # log.info(dev.stats)
+            # last_stats_printed = current_time

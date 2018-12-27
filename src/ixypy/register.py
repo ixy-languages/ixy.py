@@ -53,20 +53,27 @@ class MmapRegister(object):
         self.set(offset, new_value)
 
     def clear_flags(self, offset, flags):
-        self.set_flags(offset, ~flags)
+        self.set(offset, self.get(offset) & ~flags)
 
     def get(self, offset):
         return unpack_from('I', self.mem_buffer, offset)[0]
 
+    def print_reg(self, offset):
+        print('{:02x}'.format(self.get(offset)))
+
     def wait_clear(self, offset, mask):
-        self._wait_until_set(offset, mask, 0)
+        current = self.get(offset)
+        while (current & mask) != 0:
+            time.sleep(0.01)
+            current = self.get(offset)
 
     def wait_set(self, offset, value):
-        self._wait_until_set(offset, value, value)
+        self._wait_until_set(offset, value)
 
-    def _wait_until_set(self, offset, mask, value=0):
+    def _wait_until_set(self, offset, mask):
         current = self.get(offset)
-        while current & value != value:
-            log.debug('Waiting for flags 0x%02X in register 0x%02X to clear, current value 0x%02X', value, offset, current)
+        while (current & mask) != mask:
+            import pdb; pdb.set_trace()
+            log.debug('Waiting for flags 0x%02X in register 0x%02X to clear, current value 0x%02X', mask, offset, current)
             time.sleep(0.01)
             current = self.get(offset)

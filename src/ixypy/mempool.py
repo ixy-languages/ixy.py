@@ -40,7 +40,7 @@ class Mempool(object):
             offset = i*self.buffer_size
             physical_address = self.dma.get_physical_address(offset)
             buffer = PacketBuffer(mem[offset:offset + self.buffer_size])
-            buffer.memopool_id = self.identifier
+            buffer.mempool_id = self.identifier
             buffer.physical_address = physical_address
             buffer.size = 0
             self._buffers.append(buffer)
@@ -96,11 +96,11 @@ class PacketBuffer(object):
         pack_into('Q', self.buffer, 0, phyaddr)
 
     @property
-    def memopool_id(self):
+    def mempool_id(self):
         return unpack_from('I', self.buffer, calcsize('Q 8x'))[0]
 
-    @memopool_id.setter
-    def memopool_id(self, mempool_id):
+    @mempool_id.setter
+    def mempool_id(self, mempool_id):
         pack_into('I', self.buffer, calcsize('Q 8x'), mempool_id)
 
     @property

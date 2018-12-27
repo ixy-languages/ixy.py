@@ -4,7 +4,7 @@ import os
 
 from enum import Enum
 
-from mmap import mmap, ACCESS_WRITE
+from mmap import mmap, ACCESS_WRITE, MAP_SHARED, PROT_READ, PROT_WRITE, PROT_READ, PROT_WRITE
 from struct import unpack, calcsize
 
 
@@ -186,7 +186,7 @@ class PCIDeviceController(object):
     def map_resource(self):
         resource_fd, size = self.resource()
         try:
-            return mmap(resource_fd.fileno(), size, access=ACCESS_WRITE)
+            return mmap(resource_fd.fileno(), size, flags=MAP_SHARED, prot=PROT_READ | PROT_WRITE, access=ACCESS_WRITE)
         except OSError:
             raise MmapNotSupportedException('Failed mapping device<{}>'.format(self.device_path))
 
