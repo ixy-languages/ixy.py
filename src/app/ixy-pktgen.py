@@ -4,6 +4,7 @@ from ixypy.pci import PCIDevice, PCIAddress, PCIVendor
 from ixypy.mempool import Mempool
 from ixypy.stats import Stats
 
+import copy
 import argparse
 import logging as log
 import struct
@@ -84,7 +85,6 @@ def device(address_string):
     address = PCIAddress.from_address_string(address_string)
     device = PCIDevice(address)
     log.info("Vendor = %s", device.vendor())
-    import pdb; pdb.set_trace()
     if device.vendor == PCIVendor.virt_io:
         return VirtIo(device)
     return IxgbeDevice(device)
@@ -101,11 +101,10 @@ if __name__ == '__main__':
     stats_old = Stats(dev.pci_device)
     stats_new = Stats(dev.pci_device)
     counter = 0
-    last_stats_printed = time.monotonic()
+    last_stats_printed = time.perf_counter()
 
     seq_num = 0
     while True:
-        # log.info("Looping")
         buffers = mempool.get_buffers(BATCH_SIZE)
         for buffer in buffers:
             data_buffer = buffer.data_buffer
@@ -114,10 +113,11 @@ if __name__ == '__main__':
 
         dev.tx_batch_busy_wait(buffers)
 
-        current_time = time.monotonic()
-        if current_time - last_stats_printed > 1:
-            dev.read_stats(stats_new)
-            stats_new.print_diff(stats_old, (current_time - last_stats_printed)*10**9)
-            last_stats_printed = current_time
-            stats_old = stats_new
-            counter += 1
+        if (counter & 0xFF) == 0:
+            current_time = time.perf_counter()
+            if current_time - last_stats_printed > 1:
+                dev.read_stats(stats_new)
+                stats_new.print_diff(stats_old, current_time - last_stats_printed)
+                last_stats_printed = current_time
+                stats_old = copy.copy(stats_new)
+        counter += 1

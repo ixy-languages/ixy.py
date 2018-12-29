@@ -13,9 +13,12 @@ class Queue(object):
         desc_size = descriptor_class.byte_size()
         return [descriptor_class(self.memory[i*desc_size:desc_size*(i+1)]) for i in range(self.num_descriptors)]
 
+    def __len__(self):
+        return self.num_descriptors
+
 
 class RxQueue(Queue):
-    def __init__(self, num_descriptors, identifier, memory):
+    def __init__(self, memory, num_descriptors, identifier):
         super().__init__(memory, num_descriptors, identifier)
         self.descriptors = self._get_descriptors(RxDescriptor)
 
@@ -45,7 +48,6 @@ class IxgbeStruct(object):
     @classmethod
     def byte_size(cls):
         return calcsize(cls.data_format)
-
 
 
 class TxDescriptorRead(IxgbeStruct):
@@ -78,6 +80,12 @@ class TxDescriptorRead(IxgbeStruct):
     def olinfo_status(self, olinfo_status):
         self._pack_into(olinfo_status, 'I', 'Q I')
 
+    def __str__(self):
+        return 'Read(buf_addr={:02X}, cmd_type_len={:02X}, olinfo_status={:02X})'.format(
+            self.buffer_addr,
+            self.cmd_type_len,
+            self.olinfo_status)
+
 
 class TxDescriptorWriteback(IxgbeStruct):
     data_format = 'Q I I'
@@ -109,11 +117,21 @@ class TxDescriptorWriteback(IxgbeStruct):
     def status(self, status):
         self._pack_into(status, 'H', 'Q H')
 
+    def __str__(self):
+        return 'Wb(rsvd={:02X}, nextseq_seed={:02X}, status={:02X})'.format(
+            self.rsvd,
+            self.nextseq_seed,
+            self.status
+        )
+
 
 class TxDescriptor(IxgbeStruct):
     def __init__(self, buffer):
         self.read = TxDescriptorRead(buffer)
         self.writeback = TxDescriptorWriteback(buffer)
+
+    def __str__(self):
+        return '{} {}'.format(self.read, self.writeback)
 
     @staticmethod
     def byte_size():
@@ -129,7 +147,7 @@ class RxDescriptorRead(IxgbeStruct):
 
     @property
     def pkt_addr(self):
-        self._unpack()[0]
+        return self._unpack()[0]
 
     @pkt_addr.setter
     def pkt_addr(self, address):
@@ -137,7 +155,7 @@ class RxDescriptorRead(IxgbeStruct):
 
     @property
     def hdr_addr(self):
-        self._unpack()[1]
+        return self._unpack()[1]
 
     @hdr_addr.setter
     def hdr_addr(self, address):

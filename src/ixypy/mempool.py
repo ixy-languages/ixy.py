@@ -114,3 +114,9 @@ class PacketBuffer(object):
     @property
     def data_offset(self):
         return calcsize(self.data_format)
+
+    def __str__(self):
+        return 'PktBuff(phy_addr={:02X}, mempool_id={:d}, size={:d})'.format(
+            self.physical_address,
+            self.mempool_id,
+            self.size)
