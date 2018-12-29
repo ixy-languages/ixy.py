@@ -128,13 +128,13 @@ class IxgbeDevice(IxyDevice):
         queue.mempool = mempool
         if queue.num_descriptors & (queue.num_descriptors - 1) != 0:
             raise ValueError('Number of queue entries must be a power of 2, actual {}'.format(queue.num_descriptors))
-        for descriptor in queue.descriptors:
+        for i, descriptor in enumerate(queue.descriptors):
             pkt_buf = mempool.get_buffer()
             if not pkt_buf:
                 raise ValueError('Failed to allocate rx descriptor')
             descriptor.read.pkt_addr = pkt_buf.physical_address + pkt_buf.data_offset
             descriptor.read.hdr_addr = 0
-            queue.buffers.append(pkt_buf)
+            queue.buffers[i] = pkt_buf
         # Enable queue and wait if necessary
         self.reg.set_flags(types.IXGBE_RXDCTL(queue.identifier), types.IXGBE_RXDCTL_ENABLE)
         self.reg.wait_set(types.IXGBE_RXDCTL(queue.identifier), types.IXGBE_RXDCTL_ENABLE)
@@ -150,7 +150,6 @@ class IxgbeDevice(IxyDevice):
         # disable RX while configuring
         # The datasheet also wants us to disable some crypto-offloading related rx paths (but we don't care about them)
         self.reg.clear_flags(types.IXGBE_RXCTRL, types.IXGBE_RXCTRL_RXEN)
-        # self.reg.set(types.IXGBE_RXCTRL, types.IXGBE_RXCTRL_RXEN)
 
         # NO DCB or VT, just a single 128kb packet buffer
         self.reg.set(types.IXGBE_RXPBSIZE(0), types.IXGBE_RXPBSIZE_128KB)
@@ -293,7 +292,7 @@ class IxgbeDevice(IxyDevice):
                 # This resets the flags
                 descriptor.read.hdr_addr = 0
                 queue.buffers[rx_index] = new_buf
-                buffers[buf_index] = packet_buffer
+                buffers.append(packet_buffer)
 
                 # want to read the next one in the next iteration but we still need the current one to update RDT later
                 last_rx_index = rx_index

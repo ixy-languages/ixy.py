@@ -85,7 +85,7 @@ def device(address_string):
     address = PCIAddress.from_address_string(address_string)
     device = PCIDevice(address)
     log.info("Vendor = %s", device.vendor())
-    if device.vendor == PCIVendor.virt_io:
+    if device.vendor() == PCIVendor.virt_io:
         return VirtIo(device)
     return IxgbeDevice(device)
 

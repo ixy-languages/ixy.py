@@ -40,6 +40,10 @@ class VirtIo(IxyDevice):
         self.rx_queue = None
         self.ctrl_queue = None
         self.tx_queue = None
+        self.tx_pkts = 0
+        self.tx_bytes = 0
+        self.rx_pkts = 0
+        self.rx_bytes = 0
         super().__init__(pci_device, 'ixypy-virtio')
 
     def _initialize_device(self):
@@ -70,6 +74,12 @@ class VirtIo(IxyDevice):
         command = VirtioNetworkControl(PromiscuousModeCommand(on=True))
         self.send_cmd(command)
 
+    def read_stats(self, stats):
+        stats.rx_packets += self.rx_packets
+        stats.tx_packets += self.tx_packets
+        stats.rx_bytes += self.rx_bytes
+        stats.tx_bytes += self.tx_bytes
+
     def get_link_speed(self):
         return 1000
 
@@ -90,8 +100,8 @@ class VirtIo(IxyDevice):
             buf = vq.virtual_addresses[used_element.id]
             buf.size = used_element.length
             buffs[i] = buf
-            self.stats.rx_bytes += buf.size
-            self.stats.rx_pkts += 1
+            self.rx_bytes += buf.size
+            self.rx_pkts += 1
         for index, desc in vq.vring.descriptors:
             if desc.address != 0:
                 continue
@@ -133,8 +143,8 @@ class VirtIo(IxyDevice):
                 # raise ValueError()
                 break
             else:
-                self.stats.tx_bytes += buffer.size
-                self.stats.tx_pkts += 1
+                self.tx_bytes += buffer.size
+                self.tx_pkts += 1
                 vq.virtual_addresses[index] = buffer
                 self.net_hdr.to_buffer(buffer.head_room_buffer[-len(self.net_hdr):])
 
@@ -145,7 +155,7 @@ class VirtIo(IxyDevice):
                 desc.next_descriptor = 0
                 vq.vring.available.rings[index] = index
                 buffer_index += 1
-        log.debug("Available index %d", vq.vring.available.index)
+        # log.debug("Available index %d", vq.vring.available.index)
         vq.vring.available.index = vq.vring.available.index + buffer_index
         self._notify_queue(1)
         return buffer_index

@@ -281,7 +281,7 @@ class RxDescriptorWritebackLower(object):
 
     @staticmethod
     def byte_size():
-        return RxDescWbLoDword.byte_size()
+        return RxDescWbLoDword.byte_size() + RxDescWbHiDword.byte_size()
 
 
 class RxDescriptorWritebackUpper(IxgbeStruct):
@@ -300,7 +300,7 @@ class RxDescriptorWritebackUpper(IxgbeStruct):
 
     @property
     def length(self):
-        self._unpack()[1]
+        return self._unpack()[1]
 
     @length.setter
     def length(self, length):
@@ -319,7 +319,11 @@ class RxDescriptorWriteback(object):
     """ Advanced Descriptor writeback Sec. 7.1.6.2 """
     def __init__(self, buffer):
         self.lower = RxDescriptorWritebackLower(buffer[:RxDescriptorWritebackLower.byte_size()])
-        self.upper = RxDescriptorWritebackUpper(buffer[RxDescriptorWritebackLower.byte_size():RxDescriptorWritebackUpper.byte_size()])
+        self.upper = RxDescriptorWritebackUpper(buffer[RxDescriptorWritebackLower.byte_size():])
+
+    @staticmethod
+    def byte_size():
+        return RxDescriptorWritebackLower.byte_size() + RxDescriptorWritebackUpper.byte_size()
 
 
 class RxDescriptor(object):

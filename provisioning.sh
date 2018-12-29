@@ -41,5 +41,5 @@ ln -fs /opt/pypy3/bin/pypy3 /usr/bin/pypy3
 
 
 echo "Install necessary python dependencies"
-pip3 install tox pytest cython
+pip3 install tox pytest cython ipython
 
