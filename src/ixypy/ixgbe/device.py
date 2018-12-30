@@ -363,6 +363,7 @@ class IxgbeDevice(IxyDevice):
         if not 0 <= queue_id < len(self.rx_queues):
             raise IndexError('Queue id<{}> not in [0, {}]'.format(queue_id, len(self.rx_queues)))
         queue = self.tx_queues[queue_id]
+        queue_size = len(queue)
         """
         1. the write-back format which is written by the NIC once sending it is finished this is used in step 1
         2. the read format which is read by the NIC and written by us, this is used in step 2
@@ -384,13 +385,13 @@ class IxgbeDevice(IxyDevice):
         for buff in buffers:
             sent += 1
             descriptor = queue.descriptors[current_index]
-            next_index = wrap_ring(current_index, len(queue))
+            next_index = wrap_ring(current_index, queue_size)
             # We are full if the next index is the one we are trying to reclaim
             if queue.clean_index == next_index:
                 break
             # Remember virtual address to clean it up later
             queue.buffers[current_index] = buff
-            queue.index = wrap_ring(queue.index, len(queue))
+            queue.index = wrap_ring(queue.index, queue_size)
             # NIC reads from here
             descriptor.read.buffer_addr = buff.physical_address + buff.data_offset
             # Alaways the same flags: One buffer (EOP), advanced data descriptor, CRC offload, data length

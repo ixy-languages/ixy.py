@@ -80,6 +80,7 @@ class Mempool(object):
 
 class PacketBuffer(object):
     data_format = 'Q 8x I I 40x'
+    data_offset = 64
 
     def __init__(self, buffer):
         self.buffer = buffer
@@ -97,23 +98,28 @@ class PacketBuffer(object):
 
     @property
     def mempool_id(self):
-        return unpack_from('I', self.buffer, calcsize('Q 8x'))[0]
+        # offset: Q 8x => 16
+        return unpack_from('I', self.buffer, 16)[0]
 
     @mempool_id.setter
     def mempool_id(self, mempool_id):
-        pack_into('I', self.buffer, calcsize('Q 8x'), mempool_id)
+        # offset: Q 8x => 16
+        pack_into('I', self.buffer, 16, mempool_id)
 
     @property
     def size(self):
-        return unpack_from('I', self.buffer, calcsize('Q 8x I'))[0]
+        # offset: Q 8x I => 20
+        return unpack_from('I', self.buffer, 20)[0]
 
     @size.setter
     def size(self, size):
-        pack_into('I', self.buffer, calcsize('Q 8x I'), size)
+        # offset: Q 8x I => 20
+        pack_into('I', self.buffer, 20, size)
 
-    @property
-    def data_offset(self):
-        return calcsize(self.data_format)
+#     @property
+    # def data_offset(self):
+        # # return calcsize(self.data_format)
+        # return 64
 
     def __str__(self):
         return 'PktBuff(phy_addr={:02X}, mempool_id={:d}, size={:d})'.format(

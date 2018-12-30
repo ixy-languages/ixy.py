@@ -1,8 +1,7 @@
-from ixypy.virtio.virtio_device import VirtIo
-from ixypy.ixgbe.device import IxgbeDevice
-from ixypy.pci import PCIDevice, PCIAddress, PCIVendor
 from ixypy.mempool import Mempool
 from ixypy.stats import Stats
+from ixypy import init_device
+
 
 import copy
 import argparse
@@ -35,24 +34,9 @@ def forward(rx_dev, rx_queue, tx_dev, tx_queue):
                 mempool.free_buffer(buff)
 
 
-def device(address_string):
-    address = PCIAddress.from_address_string(address_string)
-    device = PCIDevice(address)
-    log.info("Vendor = %s", device.vendor())
-    if device.vendor() == PCIVendor.virt_io:
-        return VirtIo(device)
-    return IxgbeDevice(device)
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    pci_address_eg = '0000:00:08.0'
-    parser.add_argument('pci_2', help='Pci bus id2 e.g. {}'.format(pci_address_eg), type=str)
-    parser.add_argument('pci_1', help='Pci bus id1 e.g. {}'.format(pci_address_eg), type=str)
-    args = parser.parse_args()
-
-    dev_1 = device(args.pci_1)
-    dev_2 = device(args.pci_2)
+def run_packet_forwarding(args):
+    dev_1 = init_device(args.pci_1)
+    dev_2 = init_device(args.pci_2)
 
     last_stats_printed = time.perf_counter()
     stats_1_new, stats_1_old = Stats(dev_1.pci_device), Stats(dev_1.pci_device)
@@ -77,3 +61,19 @@ if __name__ == "__main__":
                     stats_2_old = copy.copy(stats_2_new)
                 last_stats_printed = current_time
         counter += 1
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    pci_address_eg = '0000:00:08.0'
+    parser.add_argument('pci_2', help='Pci bus id2 e.g. {}'.format(pci_address_eg), type=str)
+    parser.add_argument('pci_1', help='Pci bus id1 e.g. {}'.format(pci_address_eg), type=str)
+    args = parser.parse_args()
+    try:
+        run_packet_forwarding(args)
+    except KeyboardInterrupt:
+        log.info('Packet forwarding has been stopped')
+
+
+if __name__ == "__main__":
+    main()

@@ -1,8 +1,6 @@
-from ixypy.virtio.virtio_device import VirtIo
-from ixypy.ixgbe.device import IxgbeDevice
-from ixypy.pci import PCIDevice, PCIAddress, PCIVendor
 from ixypy.mempool import Mempool
 from ixypy.stats import Stats
+from ixypy import init_device
 
 import copy
 import argparse
@@ -11,8 +9,9 @@ import struct
 import time
 
 log.basicConfig(level=log.DEBUG,
-                    format='%(asctime)s %(levelname)-8s %(message)s',
-                    datefmt='%a, %d %b %Y %H:%M:%S')
+                format='%(asctime)s %(levelname)-8s %(message)s',
+                datefmt='%a, %d %b %Y %H:%M:%S')
+
 
 BUFFER_COUNTS = 2048
 PKT_SIZE = 60
@@ -81,22 +80,9 @@ def init_mempool():
     return mempool
 
 
-def device(address_string):
-    address = PCIAddress.from_address_string(address_string)
-    device = PCIDevice(address)
-    log.info("Vendor = %s", device.vendor())
-    if device.vendor() == PCIVendor.virt_io:
-        return VirtIo(device)
-    return IxgbeDevice(device)
-
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('address', help='NIC Pci address e.g. 0000:00:08.0', type=str)
-    args = parser.parse_args()
-
+def run_packet_generator(args):
     mempool = init_mempool()
-    dev = device(args.address)
+    dev = init_device(args.address)
 
     stats_old = Stats(dev.pci_device)
     stats_new = Stats(dev.pci_device)
@@ -121,3 +107,17 @@ if __name__ == '__main__':
                 last_stats_printed = current_time
                 stats_old = copy.copy(stats_new)
         counter += 1
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('address', help='NIC Pci address e.g. 0000:00:08.0', type=str)
+    args = parser.parse_args()
+    try:
+        run_packet_generator(args)
+    except KeyboardInterrupt:
+        log.info("Packet generator has been stopped")
+
+
+if __name__ == '__main__':
+    main()
