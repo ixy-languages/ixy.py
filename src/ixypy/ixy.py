@@ -36,6 +36,6 @@ class IxyDevice(ABC):
 
     def tx_batch_busy_wait(self, pkt_buffs, queue_id=0):
         num_sent = 0
-        while num_sent < len(pkt_buffs):
-            # log.debug('Sending %d out of %d', num_sent, len(pkt_buffs))
+        num_buffers = len(pkt_buffs)
+        while num_sent < num_buffers:
             num_sent += self.tx_batch(pkt_buffs[num_sent:], queue_id)

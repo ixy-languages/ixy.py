@@ -93,3 +93,7 @@ cdef class DmaMemory:
     if size % HUGE_PAGE_SIZE != 0:
       return ((size >> HUGE_PAGE_BITS) + 1) << HUGE_PAGE_BITS
     return size
+
+
+def wrap_ring(uint16_t index, uint16_t ring_size):
+    return <uint16_t>(index + 1) & (ring_size - 1)

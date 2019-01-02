@@ -13,25 +13,30 @@ log.basicConfig(level=log.DEBUG,
                 datefmt='%a, %d %b %Y %H:%M:%S')
 
 
-BATCH_SIZE = 32
+BATCH_SIZE = 32 
+
+pkt_counter = 1 
 
 
 def forward(rx_dev, rx_queue, tx_dev, tx_queue):
+    global pkt_counter
     rx_buffers = rx_dev.rx_batch(rx_queue, BATCH_SIZE)
 
     if rx_buffers:
-        # TODO: touch all packets, otherwise it's a completely unrealistic workload if the packet just stays in L3
+        for buff in rx_buffers:
+            buff.touch()
+
         tx_buffer_count = tx_dev.tx_batch(rx_buffers, tx_queue)
+        pkt_counter += tx_buffer_count
 
         """
-        there are two ways to handle the case that packets are not being sent out:
-        either wait on tx or drop them; in this case it's better to drop them, otherwise we accumulate latency
+        there are two ways to handle the case that packets are not being sent
+        out: either wait on tx or drop them; in this case it's better to drop
+        them, otherwise we accumulate latency
         """
-        for i in range(tx_buffer_count):
-            buff = rx_buffers[i]
+        for buff in rx_buffers[tx_buffer_count:len(rx_buffers)]:
             mempool = Mempool.pools[buff.mempool_id]
-            if mempool:
-                mempool.free_buffer(buff)
+            mempool.free_buffer(buff)
 
 
 def run_packet_forwarding(args):
@@ -60,6 +65,7 @@ def run_packet_forwarding(args):
                     stats_2_new.print_diff(stats_2_old, interval)
                     stats_2_old = copy.copy(stats_2_new)
                 last_stats_printed = current_time
+                log.info('Pkt counter = %d', pkt_counter)
         counter += 1
 
 
@@ -76,4 +82,5 @@ def main():
 
 
 if __name__ == "__main__":
+    import pdb; pdb.set_trace()
     main()

@@ -62,8 +62,8 @@ class TxDescriptorRead(IxgbeStruct):
 
     @buffer_addr.setter
     def buffer_addr(self, buffer_addr):
-        # self._pack_into(buffer_addr, 'Q')
-        pack_into('Q', self.buffer, 0, buffer_addr)
+        self._pack_into(buffer_addr, 'Q')
+        # pack_into('Q', self.buffer, 0, buffer_addr)
 
     @property
     def cmd_type_len(self):
@@ -71,8 +71,8 @@ class TxDescriptorRead(IxgbeStruct):
 
     @cmd_type_len.setter
     def cmd_type_len(self, cmd_type_len):
-        # self._pack_into(cmd_type_len, 'I', 'Q')
-        pack_into('I', self.buffer, 8, cmd_type_len)
+        self._pack_into(cmd_type_len, 'I', 'Q')
+        # pack_into('I', self.buffer, 8, cmd_type_len)
 
     @property
     def olinfo_status(self):
@@ -80,8 +80,8 @@ class TxDescriptorRead(IxgbeStruct):
 
     @olinfo_status.setter
     def olinfo_status(self, olinfo_status):
-        # self._pack_into(olinfo_status, 'I', 'Q I')
-        pack_into('I', self.buffer, 12, olinfo_status)
+        self._pack_into(olinfo_status, 'I', 'Q I')
+        # pack_into('I', self.buffer, 12, olinfo_status)
 
     def __str__(self):
         return 'Read(buf_addr={:02X}, cmd_type_len={:02X}, olinfo_status={:02X})'.format(
@@ -135,6 +135,9 @@ class TxDescriptor(IxgbeStruct):
 
     def __str__(self):
         return '{} {}'.format(self.read, self.writeback)
+    
+    def __repr__(self):
+        return str(self)
 
     @staticmethod
     def byte_size():
@@ -167,6 +170,12 @@ class RxDescriptorRead(IxgbeStruct):
     @staticmethod
     def byte_size():
         return calcsize(RxDescriptorRead.data_format)
+
+    def __repr__(self):
+        return 'RxRead(pkt_addr=0x{:02X}, hdr_addr=0x{:02X})'.format(
+            self.pkt_addr,
+            self.hdr_addr
+        )
 
 
 class RxWbHsRss(object):
@@ -311,11 +320,18 @@ class RxDescriptorWritebackUpper(IxgbeStruct):
 
     @property
     def vlan(self):
-        return self.unpack()[2]
+        return self._unpack()[2]
 
     @vlan.setter
     def vlan(self, vlan):
         self._pack_into(vlan, 'H', 'I H')
+
+    def __repr__(self):
+        return 'WbUpper(status_error=0x{:02X}, length=0x{:d}, vlan=0x{:02X})'.format(
+            self.status_error,
+            self.length,
+            self.vlan
+        )
 
 
 class RxDescriptorWriteback(object):

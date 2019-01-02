@@ -13,7 +13,6 @@ log.basicConfig(level=log.DEBUG,
                 datefmt='%a, %d %b %Y %H:%M:%S')
 
 
-BUFFER_COUNTS = 2048
 PKT_SIZE = 60
 BATCH_SIZE = 64
 
@@ -68,7 +67,7 @@ def calc_ip_checksum(msg):
 def init_mempool():
     NUM_BUFS = 2048
     mempool = Mempool.allocate(NUM_BUFS)
-    mempool.preallocate_buffers()
+    # mempool.preallocate_buffers()
     buffs = []
     for _ in range(NUM_BUFS):
         buff = mempool.get_buffer()
@@ -77,6 +76,8 @@ def init_mempool():
         cs = calc_ip_checksum(buff.data_buffer[14:])
         struct.pack_into('H', buff.data_buffer, 24, cs)
         buffs.append(buff)
+    for buff in buffs:
+        mempool.free_buffer(buff)
     return mempool
 
 

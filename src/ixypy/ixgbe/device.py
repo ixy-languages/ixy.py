@@ -2,7 +2,7 @@ import time
 import logging as log
 from functools import reduce
 
-from memory import DmaMemory
+from memory import DmaMemory, wrap_ring
 from ixypy.mempool import Mempool
 from ixypy.ixgbe.structures import RxQueue, TxQueue
 from ixypy.ixy import IxyDevice
@@ -14,13 +14,23 @@ def to_hex(val):
     return '{:02X}'.format(val)
 
 
-def wrap_ring(index, ring_size):
-    return (index + 1) & (ring_size -1)
+def is_sent(dsc):
+    return (dsc.writeback.status & types.IXGBE_ADVTXD_STAT_DD) != 0
+
+
+def snt_indx(queue):
+    return [i for i, d in enumerate(queue.descriptors) if is_sent(d)]
+
+
+def free_dsc(queue):
+    return [d for d in queue.descriptors if is_sent(d)]
+
+
+# def wrap_ring(index, ring_size):
+    # return (index + 1) & (ring_size - 1)
 
 
 def ring(start, size):
-    if start >= size:
-        raise IndexError('Start index<{}> higher than the size<{}>'.format(start, size))
     current = start
     while True:
         yield current
@@ -270,7 +280,7 @@ class IxgbeDevice(IxyDevice):
         queue = self.rx_queues[queue_id]
         rx_index = queue.index
         last_rx_index = rx_index
-        for buf_index in range(buffer_count):
+        for _ in range(buffer_count):
             descriptor = queue.descriptors[rx_index]
             status = descriptor.writeback.upper.status_error
             # status done
@@ -283,14 +293,19 @@ class IxgbeDevice(IxyDevice):
                 packet_buffer = queue.buffers[rx_index]
                 packet_buffer.size = descriptor.writeback.upper.length
 
-                # This would be the plaace to implement RX offloading by translating the device-specific
+                # This would be the place to implement RX offloading by translating the device-specific
                 # flags to an independent representation in that buffer (similar to how DPDK works)
                 new_buf = queue.mempool.get_buffer()
                 if not new_buf:
                     raise MemoryError('Failed to allocate new buffer for rx')
+        #         log.info("rx dsc: %s", descriptor.writeback.upper)
+                # log.info("rx read: %s", descriptor.read)
+                # log.info("old Buff = %s", packet_buffer)
+                # log.info("new Buff = %s", new_buf)
                 descriptor.read.pkt_addr = new_buf.physical_address + new_buf.data_offset
                 # This resets the flags
                 descriptor.read.hdr_addr = 0
+                # log.info("rx read: %s", descriptor.read)
                 queue.buffers[rx_index] = new_buf
                 buffers.append(packet_buffer)
 
@@ -316,10 +331,10 @@ class IxgbeDevice(IxyDevice):
         """
         clean_index = queue.clean_index
         while True:
-            num_cleanable_desc = queue.index - clean_index
-            if num_cleanable_desc < 0:
-                num_cleanable_desc = len(queue) + num_cleanable_desc
-            if num_cleanable_desc < batch_size:
+            cleanable = queue.index - clean_index
+            if cleanable < 0:
+                cleanable = len(queue) + cleanable
+            if cleanable < batch_size:
                 break
             """
             Calculate the index of the last descriptor in the clean batch
@@ -335,7 +350,8 @@ class IxgbeDevice(IxyDevice):
             back all buffers in the batch back to the mempool
             """
             if (status & types.IXGBE_ADVTXD_STAT_DD) != 0:
-                for i in ring(clean_index, len(queue)):
+                i = clean_index
+                while True:
                     pkt_buffer = queue.buffers[i]
                     mempool = Mempool.pools[pkt_buffer.mempool_id]
                     if mempool is None:
@@ -343,8 +359,9 @@ class IxgbeDevice(IxyDevice):
                     mempool.free_buffer(pkt_buffer)
                     if i == cleanup_to:
                         break
+                    i = wrap_ring(i, len(queue))
                 # Next descriptor to be cleaned up is one after the one we just cleaned
-                clean_index = wrap_ring(cleanup_to, queue.num_descriptors)
+                clean_index = wrap_ring(cleanup_to, len(queue))
             else:
                 """
                 Clean the whole batch or nothing. This will leave some packets in the queue forever
@@ -357,18 +374,26 @@ class IxgbeDevice(IxyDevice):
         """
         section 1.8.1 and 7.2
         we control the tail, hardware the head
-        huge performance gains possible here by sending packets in batches - writing to TDT for every packet is not efficient
-        returns the number of packets transmitted, will not block when the queue is full
+        huge performance gains possible here by sending packets in
+        batches - writing to TDT for every packet is not efficient
+        returns the number of packets transmitted, will not block
+        when the queue is full
         """
         if not 0 <= queue_id < len(self.rx_queues):
             raise IndexError('Queue id<{}> not in [0, {}]'.format(queue_id, len(self.rx_queues)))
         queue = self.tx_queues[queue_id]
-        queue_size = len(queue)
         """
         1. the write-back format which is written by the NIC once sending it is finished this is used in step 1
         2. the read format which is read by the NIC and written by us, this is used in step 2
         """
-        current_index = queue.index
+        # Step 1: Clean aleardy sent descriptors
+        queue.clean_index = self._clean_descriptors(queue)
+
+        # Step 2: Send out as many of our packets as possible
+        return self._send_out_packets(queue, buffers)
+
+    def _send_out_packets(self, queue, buffers):
+        queue_id = queue.identifier
         flags = [
             types.IXGBE_ADVTXD_DCMD_EOP,
             types.IXGBE_ADVTXD_DCMD_RS,
@@ -377,21 +402,20 @@ class IxgbeDevice(IxyDevice):
             types.IXGBE_ADVTXD_DTYP_DATA
         ]
         cmd_type_flags = reduce(lambda x, y: x | y, flags, 0)
-        # Step 1: Clean aleardy sent descriptors
-        queue.clean_index = self._clean_descriptors(queue)
-
-        # Step 2: Send out as many of our packets as possible
+        # buffer_ring = ring(queue.index, len(queue))
+        # current_index = next(buffer_ring)
+        current_index = queue.index
         sent = 0
         for buff in buffers:
-            sent += 1
             descriptor = queue.descriptors[current_index]
-            next_index = wrap_ring(current_index, queue_size)
+            # next_index = next(buffer_ring)
+            next_index = wrap_ring(current_index, len(queue))
             # We are full if the next index is the one we are trying to reclaim
             if queue.clean_index == next_index:
                 break
             # Remember virtual address to clean it up later
             queue.buffers[current_index] = buff
-            queue.index = wrap_ring(queue.index, queue_size)
+            queue.index = next_index
             # NIC reads from here
             descriptor.read.buffer_addr = buff.physical_address + buff.data_offset
             # Alaways the same flags: One buffer (EOP), advanced data descriptor, CRC offload, data length
@@ -405,6 +429,7 @@ class IxgbeDevice(IxyDevice):
             """
             descriptor.read.olinfo_status = buff_size << types.IXGBE_ADVTXD_PAYLEN_SHIFT
             current_index = next_index
+            sent += 1
         # Send out by advancing tail, i.e. pass control of the bus to the NIC
         self.reg.set(types.IXGBE_TDT(queue_id), queue.index)
         return sent
@@ -425,13 +450,11 @@ class IxgbeDevice(IxyDevice):
     def init_link(self):
         """Sec 4.6.4."""
         # Should already be set by the eeprom config
-        autoc_value = (
-            self.reg.get(types.IXGBE_AUTOC) &
-            ~types.IXGBE_AUTOC_LMS_MASK) | types.IXGBE_AUTOC_LMS_10G_SERIAL
+        ixgbe_autoc_reg = self.reg.get(types.IXGBE_AUTOC)
+        autoc_value = (ixgbe_autoc_reg & ~types.IXGBE_AUTOC_LMS_MASK) | types.IXGBE_AUTOC_LMS_10G_SERIAL
         self.reg.set(types.IXGBE_AUTOC, autoc_value)
-        autoc_10G_pma = (
-            self.reg.get(types.IXGBE_AUTOC) &
-            ~types.IXGBE_AUTOC_10G_PMA_PMD_MASK) | types.IXGBE_AUTOC_10G_XAUI
+        ixgbe_autoc_reg = self.reg.get(types.IXGBE_AUTOC)
+        autoc_10G_pma = (ixgbe_autoc_reg & ~types.IXGBE_AUTOC_10G_PMA_PMD_MASK) | types.IXGBE_AUTOC_10G_XAUI
         self.reg.set(types.IXGBE_AUTOC, autoc_10G_pma)
 
         # Negotiate link
