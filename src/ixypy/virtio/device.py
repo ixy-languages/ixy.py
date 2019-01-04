@@ -3,61 +3,35 @@ import time
 import logging as log
 
 from functools import reduce
-from os import pwrite, pread, getuid
-from struct import calcsize, unpack, pack
+from os import pwrite, pread
 
 from memory import DmaMemory
-
-from ixypy.mempool import Mempool, PacketBuffer
+from ixypy.mempool import Mempool
 from ixypy.virtio.structures import VRing, VQueue, VirtioNetworkControl, PromiscuousModeCommand, VirtioNetworkHeader
 from ixypy.ixy import IxyDevice
-from ixypy.virtio.types import *
-from ixypy.register import Register
+from ixypy.virtio import types
+from ixypy.register import VirtioRegister
 from ixypy.virtio.exception import VirtioException
 
 
-def is_running_as_root():
-    return getuid() == 0
-
-
-class VirtioRegister(Register):
-
-    def __init__(self, fd):
-        self.fd = fd
-
-    def write(self, value, offset, length=1):
-        pwrite(self.fd.fileno(), value.to_bytes(length, 'little'), offset)
-
-    def read(self, offset, length=1):
-        return int.from_bytes(pread(self.fd.fileno(), length, offset), 'little')
-
-
-class VirtIo(IxyDevice):
-    net_hdr = VirtioNetworkHeader(flags=0, gso_type=VIRTIO_NET_HDR_GSO_NONE, header_len=14+20+8)
-    legacy_device_id = 0x1000
+class VirtioLegacyDevice(IxyDevice):
+    net_hdr = VirtioNetworkHeader(flags=0, gso_type=types.VIRTIO_NET_HDR_GSO_NONE, header_len=14+20+8)
 
     def __init__(self, pci_device):
-        self.rx_queue = None
-        self.ctrl_queue = None
-        self.tx_queue = None
+        # Supporting at most 1 tx/rx queue
+        super().__init__(pci_device, 'ixypy-virtio')
+        self._verify_is_legacy()
+        self.ctrl_queue = []
         self.tx_pkts = 0
         self.tx_bytes = 0
         self.rx_pkts = 0
         self.rx_bytes = 0
-        super().__init__(pci_device, 'ixypy-virtio')
 
     def _initialize_device(self):
-        if not is_running_as_root():
-            log.warning('Not running as root')
-        if self.pci_device.has_driver():
-            log.info('Unbinding driver')
-            self.pci_device.unbind_driver()
-        if self.pci_device.config().device_id != self.legacy_device_id:
-            raise ValueError('Device with id 0x{:02X} not supported'.format(self.pci_device.config().device_id))
-        self.pci_device.enable_dma()
+        """Section 3.1"""
         log.debug('Configuring bar0')
         self.resource, self.resource_size = self.pci_device.resource()
-        self.register = VirtioRegister(self.resource)
+        self.reg = VirtioRegister(self.resource)
         self._reset_devices()
         self._ack_device()
         self._drive_device()
@@ -69,6 +43,11 @@ class VirtIo(IxyDevice):
         self.verify_device()
         log.debug('Setting promisc mode')
         self.set_promisc()
+
+    def _verify_is_legacy(self):
+        legacy_device_id = 0x1000
+        if self.pci_device.config().device_id != legacy_device_id:
+            raise VirtioException('Device with id 0x{:02X} not supported'.format(self.pci_device.config().device_id))
 
     def set_promisc(self, on=True):
         command = VirtioNetworkControl(PromiscuousModeCommand(on=True))
@@ -161,18 +140,18 @@ class VirtIo(IxyDevice):
         return buffer_index
 
     def verify_device(self):
-        if self.get_pci_status() == VIRTIO_CONFIG_STATUS_FAILED:
-            raise ValueError('Failed to initialize device')
+        if self.get_pci_status() == types.VIRTIO_CONFIG_STATUS_FAILED:
+            raise VirtioException('Failed to initialize device')
 
     def signal_ok(self):
-        self.register.write(VIRTIO_CONFIG_STATUS_DRIVER_OK, VIRTIO_PCI_QUEUE_SEL)
+        self.reg.set(types.VIRTIO_PCI_QUEUE_SEL, types.VIRTIO_CONFIG_STATUS_DRIVER_OK)
 
     def get_pci_status(self):
-        return self.register.read16(VIRTIO_PCI_STATUS)
+        return self.reg.get16(types.VIRTIO_PCI_STATUS)
 
     def send_cmd(self, net_ctrl):
-        if net_ctrl.command_class != VIRTIO_NET_CTRL_RX:
-            raise ValueError('Command class[{}] is not supported'.format(net_ctrl.command_class))
+        if net_ctrl.command_class != types.VIRTIO_NET_CTRL_RX:
+            raise VirtioException('Command class[{}] is not supported'.format(net_ctrl.command_class))
 
         send_queue = self.ctrl_queue.vring
         index, header_descriptor = self.ctrl_queue.get_free_descriptor()
@@ -187,21 +166,21 @@ class VirtIo(IxyDevice):
         # Device-readable head: cmd header
         header_descriptor.length = 2
         header_descriptor.address = pkt_buf.physical_address + offset
-        header_descriptor.flags = VRING_DESC_F_NEXT
+        header_descriptor.flags = types.VRING_DESC_F_NEXT
         header_descriptor.next_descriptor, payload_dscr = self.ctrl_queue.get_free_descriptor()
 
         log.debug('Writing to descriptor {:d}'.format(header_descriptor.next_descriptor))
         # Device-readable payload: data
         payload_dscr.length = len(net_ctrl) - 2 - 1
         payload_dscr.address = pkt_buf.physical_address + offset + 2
-        payload_dscr.flags = VRING_DESC_F_NEXT
+        payload_dscr.flags = types.VRING_DESC_F_NEXT
         payload_dscr.next_descriptor, ack_flag = self.ctrl_queue.get_free_descriptor()
 
         log.debug('Writing to descriptor {:d}'.format(payload_dscr.next_descriptor))
         # Device-writable tail: ack flag
         ack_flag.length = 1
         ack_flag.address = pkt_buf.physical_address + offset + len(net_ctrl) - 1
-        ack_flag.flags = VRING_DESC_F_WRITE
+        ack_flag.flags = types.VRING_DESC_F_WRITE
         ack_flag.next_descriptor = 0
 
         log.debug('Avail index %d', send_queue.available.index)
@@ -226,92 +205,103 @@ class VirtIo(IxyDevice):
             descriptor.reset()
 
     def _notify_queue(self, index):
-        self.register.write16(index, VIRTIO_PCI_QUEUE_NOTIFY)
+        self.reg.set16(types.VIRTIO_PCI_QUEUE_NOTIFY, index)
 
     def _notify_offset(self):
-        return self.register.read16(VIRTIO_PCI_QUEUE_NOTIFY)
+        return self.reg.get16(types.VIRTIO_PCI_QUEUE_NOTIFY)
 
     def _setup_rx_queue(self):
-        log.debug('Setting up rx queue')
-        self.rx_queue = self._build_queue(index=0)
+        self.rx_queue = self._setup_queue(index=0)
 
     def _setup_tx_queue(self):
-        log.debug('Setting up tx queue')
-        self.tx_queue = self._build_queue(index=1, mempool=False)
+        self.tx_queue = self._setup_queue(index=1, is_mempool_required=False)
 
     def _setup_ctrl_queue(self):
-        log.debug('Setting up control queue')
-        self.ctrl_queue = self._build_queue(index=2)
+        self.ctrl_queue = self._setup_queue(index=2)
 
-    def _build_queue(self, index, mempool=True):
+    def _setup_queue(self, index, is_mempool_required=True):
+        """Section 5.1.2"""
         log.debug('Setting up queue %d', index)
         self._create_virt_queue(index)
+        notify_offset = self._notify_offset()
         max_queue_size = self._max_queue_size()
         virt_queue_mem_size = VRing.byte_size(max_queue_size, 4096)
         log.debug('max queue size: %d', max_queue_size)
         log.debug('queue size in bytes: %d', virt_queue_mem_size)
-        mem = DmaMemory(virt_queue_mem_size)
-        log.debug('Allocated %s', mem)
-        self._set_physical_address(mem.physical_address)
-        notify_offset = self._notify_offset()
+        dma = DmaMemory(virt_queue_mem_size)
+        log.debug('Allocated %s', dma)
+        self._set_physical_address(dma.physical_address)
         log.debug('notify offset: %d', notify_offset)
-
         # virtual queue initialization
-        vring = VRing(memoryview(mem), max_queue_size)
-        mempool_size = max_queue_size if index == 2 else max_queue_size * 4
-        vqueue = VQueue(vring, notify_offset, Mempool.allocate(mempool_size, 2048)) if mempool else VQueue(vring, notify_offset)
+        mempool_size = self._mempool_size(index, max_queue_size) if is_mempool_required else 0
+        vqueue = self._build_queue(dma, max_queue_size, notify_offset, mempool_size) 
         vqueue.disable_interrupts()
         return vqueue
 
+    @staticmethod
+    def _build_queue(dma, ring_size, notify_offset, mempool_size):
+        mem = memoryview(dma)
+        vring = VRing(memoryview(dma), ring_size)
+        if mempool_size > 0:
+            mempool = Mempool.allocate(mempool_size)
+            return VQueue(vring, notify_offset, mempool)
+        else:
+            return VQueue(vring, notify_offset)
+    
+    @staticmethod
+    def _mempool_size(index, max_queue_size):
+        return max_queue_size if index == 2 else max_queue_size * 4
+
     def _create_virt_queue(self, idx):
-        self.register.write16(idx, VIRTIO_PCI_QUEUE_SEL)
+        self.reg.set16(types.VIRTIO_PCI_QUEUE_SEL, idx)
 
     def _set_physical_address(self, phy_address):
-        address = phy_address >> VIRTIO_PCI_QUEUE_ADDR_SHIFT
+        address = phy_address >> types.VIRTIO_PCI_QUEUE_ADDR_SHIFT
         log.debug('Setting VQueue address to: 0x%02X', address)
-        self.register.write32(address, VIRTIO_PCI_QUEUE_PFN)
+        self.reg.set32(types.VIRTIO_PCI_QUEUE_PFN, address)
 
     def _max_queue_size(self):
-        return self.register.read32(VIRTIO_PCI_QUEUE_NUM)
+        return self.reg.get32(types.VIRTIO_PCI_QUEUE_NUM)
 
     def _set_features(self):
-        self.register.write32(self._required_features(), VIRTIO_PCI_GUEST_FEATURES)
+        self.reg.set32(types.VIRTIO_PCI_GUEST_FEATURES, self._required_features())
 
     def _drive_device(self):
         log.debug('Setting the driver status')
-        self.register.write(VIRTIO_CONFIG_STATUS_DRIVER, VIRTIO_PCI_STATUS)
+        self.reg.set(types.VIRTIO_PCI_STATUS,
+                     types.VIRTIO_CONFIG_STATUS_DRIVER)
 
     def _ack_device(self):
         log.debug('Acknowledge device')
-        self.register.write(VIRTIO_CONFIG_STATUS_ACK, VIRTIO_PCI_STATUS)
+        self.reg.set(types.VIRTIO_PCI_STATUS, types.VIRTIO_CONFIG_STATUS_ACK)
 
     def _reset_devices(self):
         log.debug('Resetting device')
-        self.register.write(VIRTIO_CONFIG_STATUS_RESET, VIRTIO_PCI_STATUS)
-        while self.register.read(VIRTIO_PCI_STATUS) != VIRTIO_CONFIG_STATUS_RESET:
-            time.sleep(0.1)
+        self.reg.set(types.VIRTIO_PCI_STATUS, types.VIRTIO_CONFIG_STATUS_RESET)
+        self.reg.wait_set(types.VIRTIO_PCI_STATUS,
+                          types.VIRTIO_CONFIG_STATUS_RESET)
 
     def _setup_features(self):
         host_features = self._host_features()
         required_features = self._required_features()
         log.debug('Host features: 0x%02X', host_features)
         log.debug('Required features: 0x%02X', required_features)
-        if not host_features & VIRTIO_F_VERSION_1:
-            raise ValueError('Not a legacy device')
+        if not host_features & types.VIRTIO_F_VERSION_1:
+            raise VirtioException('In legacy mode but, not a legacy device')
         if (host_features & required_features) != required_features:
-            raise ValueError("Device doesn't support required features")
-        log.debug('Guest features before negotiation: 0x%02X', self.register.read32(VIRTIO_PCI_GUEST_FEATURES))
+            raise VirtioException("Device doesn't support required features")
+        log.debug('Guest features before negotiation: 0x%02X', self.reg.get32(types.VIRTIO_PCI_GUEST_FEATURES))
         self._set_features()
-        log.debug('Guest features after negotiation: 0x%02X', self.register.read32(VIRTIO_PCI_GUEST_FEATURES))
+        log.debug('Guest features after negotiation: 0x%02X', self.reg.get32(types.VIRTIO_PCI_GUEST_FEATURES))
 
     def _host_features(self):
-        return self.register.read32(VIRTIO_PCI_HOST_FEATURES)
+        return self.reg.get32(types.VIRTIO_PCI_HOST_FEATURES)
 
     @staticmethod
     def _required_features():
-        features = [VIRTIO_NET_F_CSUM,
-                    VIRTIO_NET_F_GUEST_CSUM,
-                    VIRTIO_NET_F_CTRL_VQ,
-                    # VIRTIO_F_ANY_LAYOUT,
-                    VIRTIO_NET_F_CTRL_RX]
+        features = [types.VIRTIO_NET_F_CSUM,
+                    types.VIRTIO_NET_F_GUEST_CSUM,
+                    types.VIRTIO_NET_F_CTRL_VQ,
+                    types.VIRTIO_F_ANY_LAYOUT,
+                    types.VIRTIO_NET_F_CTRL_RX]
         return reduce(lambda x, y: x | y, map(lambda x: 1 << x, features), 0)

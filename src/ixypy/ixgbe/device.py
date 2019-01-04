@@ -47,44 +47,38 @@ class IxgbeDevice(IxyDevice):
     TX_DESCRIPTOR_SIZE = 16
 
     def __init__(self, pci_device, num_rx_queues=1, num_tx_queues=1):
-        self.resource = None
-        self.tx_queues = None
-        self.rx_queues = None
-        super().__init__(pci_device, 'ixy-ixgbe', num_rx_queues, num_tx_queues)
+        super().__init__(pci_device,
+                         'ixy-ixgbe',
+                         self.MAX_QUEUES,
+                         self.MAX_QUEUES,
+                         num_rx_queues,
+                         num_tx_queues)
 
     def _initialize_device(self):
-        if not 0 < self.num_rx_queues < self.MAX_QUEUES:
-            raise ValueError('Invalid rx queue number {}'.format(
-                self.num_rx_queues))
-        if not 0 < self.num_tx_queues < self.MAX_QUEUES:
-            raise ValueError('Invalid tx queue number {}'.format(
-                self.num_tx_queues))
-        if self.pci_device.has_driver():
-            log.info('Unbinding driver')
-            self.pci_device.unbind_driver()
         self.reg = MmapRegister(memoryview(self.pci_device.map_resource()))
         self.reset_and_init()
 
     def reset_and_init(self):
+        """Section 4.6.3"""
         log.info('Resetting device %s', self.pci_device.address)
-        self.disable_interrupts()
-        self.global_reset()
-        self.disable_interrupts()
+        self._disable_interrupts()
+        self._global_reset()
+        self._disable_interrupts()
 
         log.info('Initializing device %s', self.pci_device.address)
         self._wait_for_eeprom()
         self._wait_for_dma_init()
 
-        self.init_link()
-        self.init_statistict()
-        self.init_rx()
-        self.init_tx()
+        self._init_link()
+        self._init_statistict()
+        self._init_rx()
+        self._init_tx()
         for queue in self.rx_queues:
-            self.start_rx_queue(queue)
+            self._start_rx_queue(queue)
         for queue in self.tx_queues:
-            self.start_tx_queue(queue)
+            self._start_tx_queue(queue)
         self.set_promisc()
-        self.wait_for_link()
+        self._wait_for_link()
 
     def set_promisc(self, enabled=True):
         if enabled:
@@ -94,8 +88,8 @@ class IxgbeDevice(IxyDevice):
             log.info('Disabling promisc mode')
             self.reg.clear_flags(types.IXGBE_FCTRL, types.IXGBE_FCTRL_MPE | types.IXGBE_FCTRL_UPE)
 
-    def wait_for_link(self):
-        log.info('Waiting for link')
+    def _wait_for_link(self):
+        log.info('Waiting for link...')
         waiting_time = 0
         link_speed = self.get_link_speed()
         while waiting_time < 10 and link_speed == 0:
@@ -122,7 +116,7 @@ class IxgbeDevice(IxyDevice):
             log.warning('Unknown link speed: %d', speed)
             return 0
 
-    def start_rx_queue(self, queue):
+    def _start_rx_queue(self, queue):
         """
         2048 as pktbuf size is strictly speaking incorrect:
         we need a few headers (1 cacheline), so there's only 1984 bytes left for the device
@@ -155,7 +149,7 @@ class IxgbeDevice(IxyDevice):
         # was set to 0 before in the init function
         self.reg.set(types.IXGBE_RDT(queue.identifier), queue.num_descriptors - 1)
 
-    def init_rx(self):
+    def _init_rx(self):
         """Sec 4.6.7"""
         # disable RX while configuring
         # The datasheet also wants us to disable some crypto-offloading related rx paths (but we don't care about them)
@@ -175,7 +169,7 @@ class IxgbeDevice(IxyDevice):
 
         # Per queue config
         self.rx_queues = [
-            self.init_rx_queue(index) for index in range(self.num_rx_queues)
+            self._init_rx_queue(index) for index in range(self.num_rx_queues)
         ]
 
         # Sec 4.6.7 - set magic bits
@@ -190,7 +184,7 @@ class IxgbeDevice(IxyDevice):
         # Start RX
         self.reg.set_flags(types.IXGBE_RXCTRL, types.IXGBE_RXCTRL_RXEN)
 
-    def init_rx_queue(self, index):
+    def _init_rx_queue(self, index):
         log.info('Initializing rx queue %d', index)
         # Enable advanced rx descriptors
         srrctl = types.IXGBE_SRRCTL(index)
@@ -219,7 +213,7 @@ class IxgbeDevice(IxyDevice):
         queue = RxQueue(memoryview(mem), self.NUM_RX_QUEUE_ENTRIES, index)
         return queue
 
-    def start_tx_queue(self, queue):
+    def _start_tx_queue(self, queue):
         log.info('Starting tx queue %d', queue.identifier)
         if queue.num_descriptors & (queue.num_descriptors - 1) != 0:
             raise ValueError('Numberof queue entries must be a power of 2')
@@ -231,7 +225,7 @@ class IxgbeDevice(IxyDevice):
         self.reg.set_flags(types.IXGBE_TXDCTL(queue.identifier), types.IXGBE_TXDCTL_ENABLE)
         self.reg.wait_set(types.IXGBE_TXDCTL(queue.identifier), types.IXGBE_TXDCTL_ENABLE)
 
-    def init_tx_queue(self, index):
+    def _init_tx_queue(self, index):
         log.info('Initializing TX queue %d', index)
         # Sec 7.1.9 - Set up descriptor ring
         ring_size = self.NUM_TX_QUEUE_ENTRIES * self.TX_DESCRIPTOR_SIZE
@@ -249,7 +243,7 @@ class IxgbeDevice(IxyDevice):
         queue = TxQueue(memoryview(mem), self.NUM_TX_QUEUE_ENTRIES, index)
         return queue
 
-    def init_tx(self):
+    def _init_tx(self):
         """ Sec 4.6.8 """
         # CRC offload and small packet padding
         self.reg.set_flags(types.IXGBE_HLREG0, types.IXGBE_HLREG0_TXCRCEN | types.IXGBE_HLREG0_TXPADEN)
@@ -263,9 +257,9 @@ class IxgbeDevice(IxyDevice):
         self.reg.clear_flags(types.IXGBE_RTTDCS, types.IXGBE_RTTDCS_ARBDIS)
 
         self.tx_queues = [
-            self.init_tx_queue(index) for index in range(self.num_tx_queues)
+            self._init_tx_queue(index) for index in range(self.num_tx_queues)
         ]
-        self.enable_dma()
+        self._enable_dma()
 
     def rx_batch(self, queue_id, buffer_count):
         """
@@ -434,7 +428,7 @@ class IxgbeDevice(IxyDevice):
         self.reg.set(types.IXGBE_TDT(queue_id), queue.index)
         return sent
 
-    def enable_dma(self):
+    def _enable_dma(self):
         self.reg.set(types.IXGBE_DMATXCTL, types.IXGBE_DMATXCTL_TE)
 
     def read_stats(self, stats):
@@ -447,7 +441,7 @@ class IxgbeDevice(IxyDevice):
         stats.rx_bytes += rx_bytes
         stats.tx_bytes += tx_bytes
 
-    def init_link(self):
+    def _init_link(self):
         """Sec 4.6.4."""
         # Should already be set by the eeprom config
         ixgbe_autoc_reg = self.reg.get(types.IXGBE_AUTOC)
@@ -461,14 +455,11 @@ class IxgbeDevice(IxyDevice):
         self.reg.set_flags(types.IXGBE_AUTOC, types.IXGBE_AUTOC_AN_RESTART)
         # the datasheet suggests waiting here, we will wait at a later point
 
-    def init_statistict(self):
+    def _init_statistict(self):
         """
         Sec. 4.6.7 - init rx
         reset on read registers, just read them once
         """
-        self._reset_stats()
-
-    def _reset_stats(self):
         self.reg.get(types.IXGBE_GPRC)
         self.reg.get(types.IXGBE_GPTC)
         self.reg.get(types.IXGBE_GORCL)
@@ -476,15 +467,15 @@ class IxgbeDevice(IxyDevice):
         self.reg.get(types.IXGBE_GOTCL)
         self.reg.get(types.IXGBE_GOTCH)
 
-    def disable_interrupts(self):
+    def _disable_interrupts(self):
         """Sec 4.6.3.1 - Disable all interrupts."""
         self.reg.set(types.IXGBE_EIMC, 0x7FFFFFFF)
 
-    def global_reset(self):
+    def _global_reset(self):
         """Sec 4.6.3.2 - Global reset (software + link)."""
         self.reg.set(types.IXGBE_CTRL, types.IXGBE_CTRL_RST_MASK)
         self.reg.wait_clear(types.IXGBE_CTRL, types.IXGBE_CTRL_RST_MASK)
-        time.sleep(0.1)
+        time.sleep(0.01)
 
     def _wait_for_eeprom(self):
         """Sec 4.6.3.1 - Wait for EEPROM auto read completion."""

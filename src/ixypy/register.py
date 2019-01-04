@@ -1,29 +1,41 @@
 import re
 import time
-import logging as log
+from os import pwrite, pread
 from struct import pack_into, unpack_from
 
 
 class Register(object):
-    def write(self, value, offset, length):
+    def set(self, reg, value, length):
         """
         Args:
+            reg: register offset
             value: the value to be written
             length: length in bytes of the value
-            offset: register offset
         """
         pass
 
-    def read(self, offset, length):
+    def get(self, reg, length):
         """
         Args:
+            reg: register offset
             length: length in bytes of the value
-            offset: register offset
         """
         pass
 
+    def wait_set(self, reg, mask, length=1):
+        """
+        Args:
+            reg: register offset
+            mask: bitmask to be set
+            length: length in bytes of the mask
+        """
+        current = self.get(reg, length)
+        while (current & mask) != mask:
+            time.sleep(0.01)
+            current = self.get(reg, length)
+
     def __getattr__(self, name):
-        op = re.match(r"(?P<operation>(write|read))(?P<length>\d+)", name)
+        op = re.match(r"(?P<operation>(get|set|wait_set))(?P<length>\d+)", name)
 
         def wrapper(*args, **kwargs):
             length = int(op['length'])
@@ -39,13 +51,22 @@ class Register(object):
             raise AttributeError('No attribute {} found'.format(name))
 
 
-class MmapRegister(object):
+class VirtioRegister(Register):
+    def __init__(self, fd):
+        self.fd = fd
 
+    def set(self, offset, value, length=1):
+        pwrite(self.fd.fileno(), value.to_bytes(length, 'little'), offset)
+
+    def get(self, offset, length=1):
+        return int.from_bytes(pread(self.fd.fileno(), length, offset), 'little')
+
+
+class MmapRegister(object):
     def __init__(self, mem_buffer):
         self.mem_buffer = mem_buffer
 
     def set(self, offset, value):
-        # log.debug('Setting value=%d offset=%d', value, offset)
         pack_into('I', self.mem_buffer, offset, value & 0xFFFFFFFF)
 
     def set_flags(self, offset, flags):
@@ -67,13 +88,8 @@ class MmapRegister(object):
             time.sleep(0.01)
             current = self.get(offset)
 
-    def wait_set(self, offset, value):
-        self._wait_until_set(offset, value)
-
-    def _wait_until_set(self, offset, mask):
+    def wait_set(self, offset, mask):
         current = self.get(offset)
         while (current & mask) != mask:
-            import pdb; pdb.set_trace()
-            log.debug('Waiting for flags 0x%02X in register 0x%02X to clear, current value 0x%02X', mask, offset, current)
             time.sleep(0.01)
             current = self.get(offset)

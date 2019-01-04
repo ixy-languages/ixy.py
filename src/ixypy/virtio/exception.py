@@ -1,4 +1,7 @@
-class VirtioException(Exception):
+from ixypy.ixy import IxyException
+
+
+class VirtioException(IxyException):
     pass
 
 
