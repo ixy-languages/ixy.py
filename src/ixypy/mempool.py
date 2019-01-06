@@ -170,7 +170,8 @@ class PacketBuffer(object):
         return self.physical_address + self.data_offset
 
     def touch(self):
-        self.buffer[self.data_offset+1] += 1
+        current_val = self.buffer[self.data_offset + 1]
+        self.buffer[self.data_offset + 1] = (current_val + 1) % 0xFF
 
     def __str__(self):
         return 'PktBuff(phy_addr={:02X}, mempool_id={:d}, size={:d}, data_addr=0x{:02X})'.format(

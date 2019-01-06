@@ -34,6 +34,11 @@ class VQueue(IxyQueue):
                 # return index, descriptor
         raise VirtioException('Queue overflow')
 
+    def free_descriptors(self):
+        for index, desc in enumerate(self.vring.descriptors):
+            if desc.address == 0:
+                yield index, desc
+
 
 class VirtioNetworkHeader(object):
     data_format = 'B B H H H H'
@@ -279,6 +284,7 @@ class Available(object):
 
     @index.setter
     def index(self, index):
+        index = index % 0xFFFF
         self._pack_into_buffer(index, 'H', 'H')
 
     @staticmethod

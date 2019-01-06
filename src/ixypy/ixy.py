@@ -110,7 +110,7 @@ class IxyDevice(ABC):
         pass
 
     @abstractmethod
-    def rx_batch(self, queue_id, buffer_count):
+    def rx_batch(self, queue_id, batch_size):
         pass
 
     def tx_batch_busy_wait(self, pkt_buffs, queue_id=0):

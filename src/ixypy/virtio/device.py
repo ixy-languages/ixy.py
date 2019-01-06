@@ -62,46 +62,43 @@ class VirtioLegacyDevice(IxyDevice):
     def get_link_speed(self):
         return 1000
 
-    def rx_batch(self, buffs, queue_id=0):
+    def rx_batch(self, queue_id, batch_size):
         vq = self.rx_queues[0]
-        buff_indx = 0
-        for i in range(len(buffs)):
+        buffs = []
+        for i in range(batch_size):
             buff_indx = i
             if vq.used_last_index == vq.vring.used.index:
                 break
-            used_element = vq.vring.used.rings[vq.used_last_idx % vq.vring.size]
-            log.debug('UE: %s', used_element)
+            used_element = vq.vring.used.rings[vq.used_last_index % vq.vring.size]
             desc = vq.vring.descriptors[used_element.id]
             vq.used_last_index += 1
             if desc.flags != types.VRING_DESC_F_WRITE:
                 log.error("Unsupported rx flags on descriptor: %x", desc.flags)
             desc.reset()
             buf = vq.buffers[used_element.id]
+            buffs.append(buf)
             buf.size = used_element.length
-            buffs[i] = buf
             self.rx_bytes += buf.size
             self.rx_pkts += 1
-        for index, desc in vq.vring.descriptors:
-            if desc.address != 0:
-                continue
-            pkt_buf = vq.mempool.allocate_buffer()
-            if not pkt_buf:
-                log.error('Failed to allocate rx buffer')
+
+        for index, desc in vq.free_descriptors():
+            pkt_buf = vq.mempool.get_buffer()
             pkt_buf.size = vq.mempool.buffer_size
             self.net_hdr.to_buffer(pkt_buf.head_room_buffer[-len(self.net_hdr):])
             desc.length = pkt_buf.size + len(self.net_hdr)
-            offset = pkt_buf.data_offset - len(self.net_hdr)
-            desc.address = pkt_buf.physical_address + offset
+            desc.address = pkt_buf.data_addr
             desc.flags = types.VRING_DESC_F_WRITE
             desc.next = 0
             vq.buffers[index] = pkt_buf
             vq.vring.available.rings[vq.vring.available.index % vq.vring.size] = index
             vq.vring.available.index += 1
+            self.rx_pkts += 1
+            self.rx_bytes = pkt_buf.size
             self._notify_queue(0)
-        return buff_indx
+        return buffs
 
-    def tx_batch(self, buffers, queue_id=0):
-        vq = self.tx_queues[0]
+    def _free_sent_buffers(self, vq):
+        mempool = None
         while vq.used_last_index != vq.vring.used.index:
             used_element = vq.vring.used.rings[vq.used_last_index % vq.vring.size]
             idx = used_element.id
@@ -115,22 +112,24 @@ class VirtioLegacyDevice(IxyDevice):
             desc.length = 0
             self.tx_bytes += buff.size
             self.tx_pkts += 1
-            mempool = Mempool.pools[buff.mempool_id]
+            if not mempool:
+                mempool = Mempool.pools[buff.mempool_id]
             mempool.free_buffer(buff)
             vq.used_last_index += 1
-            
 
+    def tx_batch(self, buffers, queue_id=0):
+        vq = self.tx_queues[0]
+        self._free_sent_buffers(vq)
         buffer_index = 0
-        index = 0
+        free_descriptors = vq.free_descriptors()
         for buffer in buffers:
             try:
-                index, desc = vq.get_free_descriptor(index)
-            except VirtioException:
+                index, desc = next(free_descriptors)
+            except StopIteration:
                 break
             else:
                 vq.buffers[index] = buffer
                 self.net_hdr.to_buffer(buffer.head_room_buffer[-len(self.net_hdr):])
-
                 desc.length = buffer.size + len(self.net_hdr)
                 offset = buffer.data_offset - len(self.net_hdr)
                 desc.address = buffer.physical_address + offset
@@ -138,8 +137,7 @@ class VirtioLegacyDevice(IxyDevice):
                 desc.next_descriptor = 0
                 vq.vring.available.rings[index] = index
                 buffer_index += 1
-        next_index = (vq.vring.available.index + buffer_index) % 0xFFFF
-        vq.vring.available.index = next_index
+        vq.vring.available.index += buffer_index
         self._notify_queue(vq.identifier)
         return buffer_index
 
