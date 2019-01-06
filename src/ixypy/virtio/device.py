@@ -4,7 +4,7 @@ import logging as log
 
 from functools import reduce
 
-from memory import DmaMemory, wrap_ring
+from memory import DmaMemory
 from ixypy.mempool import Mempool
 from ixypy.virtio.structures import VRing, VQueue, VirtioNetworkControl, PromiscuousModeCommand, VirtioNetworkHeader
 from ixypy.ixy import IxyDevice

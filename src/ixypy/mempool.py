@@ -112,21 +112,21 @@ class Mempool(object):
 pkt_dump_count = 0
 class PacketBuffer(object):
     data_format = 'Q 8x I I 40x'
-    # data_offset = 64
+    data_offset = calcsize(data_format)
+    head_room_offset = calcsize('Q 8x I I')
     struct = Struct(data_format)
 
     def __init__(self, buffer):
         self.buffer = buffer
         self.data_buffer = buffer[self.struct.size:]
         # data: Q 8x I I ==> 24
-        self.head_room_buffer = buffer[calcsize('Q 8x I I'):self.struct.size]
+        self.head_room_buffer = buffer[self.head_room_offset:self.struct.size]
 
     def dump(self):
         global pkt_dump_count
         with open('dumps/buffs/buff_{:d}'.format(pkt_dump_count), 'wb') as f:
             f.write(self.buffer)
             pkt_dump_count += 1
-
 
     @property
     def physical_address(self):
@@ -139,31 +139,26 @@ class PacketBuffer(object):
     @property
     def mempool_id(self):
         # offset: Q 8x => 16
-        # return unpack_from('I', self.buffer, 16)[0]
-        return unpack_from('I', self.buffer, calcsize('Q 8x'))[0]
+        return unpack_from('I', self.buffer, 16)[0]
+        # return unpack_from('I', self.buffer, calcsize('Q 8x'))[0]
 
     @mempool_id.setter
     def mempool_id(self, mempool_id):
         # offset: Q 8x => 16
-        # pack_into('I', self.buffer, 16, mempool_id)
-        pack_into('I', self.buffer, calcsize('Q 8x'), mempool_id)
+        pack_into('I', self.buffer, 16, mempool_id)
+        # pack_into('I', self.buffer, calcsize('Q 8x'), mempool_id)
 
     @property
     def size(self):
         # offset: Q 8x I => 20
-        # return unpack_from('I', self.buffer, 20)[0]
-        return unpack_from('I', self.buffer, calcsize('Q 8x I'))[0]
+        return unpack_from('I', self.buffer, 20)[0]
+        # return unpack_from('I', self.buffer, calcsize('Q 8x I'))[0]
 
     @size.setter
     def size(self, size):
         # offset: Q 8x I => 20
-        # pack_into('I', self.buffer, 20, size)
-        pack_into('I', self.buffer, calcsize('Q 8x I'), size)
-
-    @property
-    def data_offset(self):
-        return calcsize(self.data_format)
-        # return 64
+        pack_into('I', self.buffer, 20, size)
+        # pack_into('I', self.buffer, calcsize('Q 8x I'), size)
 
     @property
     def data_addr(self):

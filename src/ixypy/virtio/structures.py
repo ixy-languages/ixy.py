@@ -228,7 +228,8 @@ class VRingDescriptor(IxyStruct):
 
     @address.setter
     def address(self, address):
-        self._pack_into(address, 'Q')
+        pack_into('Q', self.mem, 0, address)
+        # self._pack_into(address, 'Q')
 
     @property
     def length(self):
@@ -236,7 +237,9 @@ class VRingDescriptor(IxyStruct):
 
     @length.setter
     def length(self, length):
-        self._pack_into(length, 'I', 'Q')
+        # self._pack_into(length, 'I', 'Q')
+        # Q ==> 8
+        pack_into('I', self.mem, 8, length)
 
     @property
     def flags(self):
@@ -244,7 +247,9 @@ class VRingDescriptor(IxyStruct):
 
     @flags.setter
     def flags(self, flags):
-        self._pack_into(flags, 'H', 'Q I')
+        # self._pack_into(flags, 'H', 'Q I')
+        # Q I ==> 12
+        pack_into('H', self.mem, 12, flags)
 
     @property
     def next_descriptor(self):
@@ -252,7 +257,9 @@ class VRingDescriptor(IxyStruct):
 
     @next_descriptor.setter
     def next_descriptor(self, next_descriptor):
-        self._pack_into(next_descriptor, 'H', 'Q I H')
+        # self._pack_into(next_descriptor, 'H', 'Q I H')
+        # Q I H ==> 14
+        pack_into('H', self.mem, 12, next_descriptor)
 
     def reset(self):
         self.write(0, 0, 0, 0)
