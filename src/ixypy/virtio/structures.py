@@ -3,6 +3,9 @@ from collections import OrderedDict
 from ixypy.virtio.types import VRING_AVAIL_F_NO_INTERRUPT, VIRTIO_NET_CTRL_RX, VIRTIO_NET_CTRL_RX_PROMISC
 from ixypy.virtio.exception import VirtioException, BufferSizeException
 
+from ixypy.ixy import IxyStruct, IxyQueue
+
+
 MAX_QUEUE_SIZE = 32768
 
 
@@ -10,23 +13,25 @@ def align(offset, alignment=4096):
     return (offset + (alignment-1)) & -alignment
 
 
-class VQueue(object):
-    def __init__(self, vring, notification_offset, mempool=None, used_last_index=0):
-        self.mempool = mempool
-        self.vring = vring
+class VQueue(IxyQueue):
+    def __init__(self, memory, size, identifier, notification_offset, mempool=None):
+        super().__init__(memory, size, identifier, mempool)
+        self.vring = VRing(memory, size) 
         self.notification_offset = notification_offset
-        self.used_last_index = used_last_index
-        self.virtual_addresses = [0]*vring.size
-        self.buffers = []
+        self.used_last_index = 0
 
     def disable_interrupts(self):
         self.vring.available.flags = VRING_AVAIL_F_NO_INTERRUPT
         self.vring.used.flags = 0
 
-    def get_free_descriptor(self):
-        for index, descriptor in enumerate(self.vring.descriptors):
-            if descriptor.address == 0:
-                return index, descriptor
+    def get_free_descriptor(self, index=0):
+        for i in range(index, len(self.vring.descriptors)):
+            desc = self.vring.descriptors[i]
+            if desc.address == 0:
+                return i, desc
+        # for index, descriptor in enumerate(self.vring.descriptors):
+            # if descriptor.address == 0:
+                # return index, descriptor
         raise VirtioException('Queue overflow')
 
 
@@ -92,13 +97,13 @@ class VirtioNetworkControl(object):
     """
     data_format = 'B B {:d}B B'
 
-    def __init__(self, command, ack=None):
+    def __init__(self, command, ack=0):
         self.command = command
         self.ack = ack
 
     def to_buffer(self, buffer, offset=0):
         fmt = self.data_format.format(len(self.command))
-        pack_into(fmt, buffer, offset, self.command.class_, self.command.id, *self.command.bytes(), 1)
+        pack_into(fmt, buffer, offset, self.command.class_, self.command.id, *self.command.bytes(), self.ack)
 
     @staticmethod
     def from_bytes(byte_sequence):
@@ -117,6 +122,7 @@ class VirtioNetworkControl(object):
 
 
 class VRing(object):
+    dump_count = 0
     def __init__(self, buffer, size, alignment=4096):
         if size > MAX_QUEUE_SIZE:
             raise VirtioException("Size[{}] exceeded maximum size[{}]".format(size, MAX_QUEUE_SIZE))
@@ -140,11 +146,11 @@ class VRing(object):
         descriptor_tbl_size = VRing.descriptor_table_size(self.size)
         available_queue_size = VRing.available_queue_size(self.size)
         sub_buff = self.buffer[descriptor_tbl_size:(descriptor_tbl_size + available_queue_size)]
-        avail = VRingAvailable(sub_buff, self.size)
+        avail = Available(sub_buff, self.size)
         avail.index = 0
         for i in range(len(avail.rings)):
             avail.rings[i] = 0
-        return VRingAvailable(sub_buff, self.size)
+        return Available(sub_buff, self.size)
 
     def _used(self):
         buffer_start = len(self) - VRing.used_queue_size(self.size)
@@ -159,6 +165,11 @@ class VRing(object):
     def __len__(self):
         return VRing.byte_size(self.size, self.alignment)
 
+    def dump(self):
+        with open('dumps/vring/vring_{:d}'.format(self.dump_count), 'wb') as f:
+            f.write(self.buffer)
+            self.dump_count += 1
+
     @staticmethod
     def used_queue_size(queue_size):
         return VRingUsed.byte_size(queue_size)
@@ -169,7 +180,7 @@ class VRing(object):
 
     @staticmethod
     def available_queue_size(queue_size):
-        return VRingAvailable.byte_size(queue_size)
+        return Available.byte_size(queue_size)
 
     @staticmethod
     def padding(queue_size, alignment=4096):
@@ -187,25 +198,19 @@ class VRing(object):
         return align(dsc_tbl_sz + avail_qsz, alignment) + used_qsz
 
 
-class VRingDescriptor(object):
-    data_format = OrderedDict({
-        'address': 'Q',
-        'length': 'I',
-        'flags': 'H',
-        'next': 'H'
-    })
+class VRingDescriptor(IxyStruct):
+    data_format = 'Q I H H'
 
-    def __init__(self, buffer):
-        self.struct = Struct(self.format())
-        self.buffer = buffer
+    def __init__(self, mem):
+        super().__init__(mem)
 
     @staticmethod
-    def create_descriptor(buffer):
+    def create_descriptor(mem):
         """
         Creates a new descriptor around a buffer
         and sets all the fields to zero
         """
-        descriptor = VRingDescriptor(buffer)
+        descriptor = VRingDescriptor(mem)
         descriptor.length = 0
         descriptor.address = 0
         descriptor.flags = 0
@@ -218,7 +223,7 @@ class VRingDescriptor(object):
 
     @address.setter
     def address(self, address):
-        self._pack_into_buffer(value=address, field='address')
+        self._pack_into(address, 'Q')
 
     @property
     def length(self):
@@ -226,7 +231,7 @@ class VRingDescriptor(object):
 
     @length.setter
     def length(self, length):
-        self._pack_into_buffer(length, prefix='Q', field='length')
+        self._pack_into(length, 'I', 'Q')
 
     @property
     def flags(self):
@@ -234,7 +239,7 @@ class VRingDescriptor(object):
 
     @flags.setter
     def flags(self, flags):
-        self._pack_into_buffer(value=flags, prefix='Q I', field='flags')
+        self._pack_into(flags, 'H', 'Q I')
 
     @property
     def next_descriptor(self):
@@ -242,37 +247,21 @@ class VRingDescriptor(object):
 
     @next_descriptor.setter
     def next_descriptor(self, next_descriptor):
-        self._pack_into_buffer(value=next_descriptor, prefix='Q I H', field='next')
+        self._pack_into(next_descriptor, 'H', 'Q I H')
 
     def reset(self):
         self.write(0, 0, 0, 0)
 
     def write(self, length, addr, flags, next_descriptor):
-        self.struct.pack_into(self.buffer, 0, length, addr, flags, next_descriptor)
-
-    def _pack_into_buffer(self, value, field, prefix=''):
-        field_format = self.data_format[field]
-        offset = calcsize(prefix)
-        pack_into(field_format, self.buffer, offset, value)
-
-    @staticmethod
-    def format():
-        return ' '.join([item for _, item in VRingDescriptor.data_format.items()])
-
-    @staticmethod
-    def byte_size():
-        return calcsize(VRingDescriptor.format())
-
-    def _unpack(self):
-        return self.struct.unpack(self.buffer)
+        self.data_struct.pack_into(self.mem, 0, length, addr, flags, next_descriptor)
 
 
-class VRingAvailable(object):
-    format = 'H H'
+class Available(object):
+    data_format = 'H H'
 
     def __init__(self, buffer, size):
         self.size = size
-        self.struct = Struct(VRingAvailable.format.format(size))
+        self.struct = Struct(Available.data_format.format(size))
         self.buffer = buffer[:self.struct.size]
         self.rings = RingList(buffer[self.struct.size:], size)
 
@@ -301,7 +290,7 @@ class VRingAvailable(object):
          uint16_t available[num];
          uint16_t used_event_idx;
         """
-        return calcsize('H H {:d}H'.format(queue_size))
+        return calcsize('H H {:d}H H'.format(queue_size))
 
     def __str__(self):
         return 'size={} buffer_size={}'.format(self.size, len(self.buffer))
@@ -355,7 +344,7 @@ class RingListIterator(object):
 
 
 class VRingUsedElement(object):
-    format = 'H x x I'
+    format = 'I I'
 
     def __init__(self, buffer):
         self.buffer = buffer
@@ -374,7 +363,7 @@ class VRingUsedElement(object):
 
     @id.setter
     def id(self, _id):
-        self._pack_into_buffer(_id, 'H')
+        self._pack_into_buffer(_id, 'I')
 
     @property
     def length(self):
@@ -382,7 +371,7 @@ class VRingUsedElement(object):
 
     @length.setter
     def length(self, length):
-        self._pack_into_buffer(length, 'I', 'H x x')
+        self._pack_into_buffer(length, 'I', 'I')
 
     @staticmethod
     def byte_size():
@@ -400,13 +389,13 @@ class VRingUsedElement(object):
 
 
 class VRingUsed(object):
-    format = 'H H {:d}x'
+    data_format = 'H H {:d}x'
 
     def __init__(self, buffer, size):
         self.buffer = buffer
         self.size = size
         used_elem_size = VRingUsedElement.byte_size()
-        self.struct = Struct(VRingUsed.format.format(used_elem_size*size))
+        self.struct = Struct(VRingUsed.data_format.format(used_elem_size*size))
         elem_buff = buffer[4:]
         self.rings = [VRingUsedElement.create_used_element(elem_buff[i*used_elem_size:used_elem_size*(i + 1)]) for i in range(size)]
 
@@ -438,4 +427,4 @@ class VRingUsed(object):
 
     @staticmethod
     def byte_size(queue_size):
-        return calcsize(VRingUsed.format.format(VRingUsedElement.byte_size()*queue_size))
+        return calcsize(VRingUsed.data_format.format(VRingUsedElement.byte_size()*queue_size))

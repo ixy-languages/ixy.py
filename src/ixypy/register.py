@@ -56,7 +56,8 @@ class VirtioRegister(Register):
         self.fd = fd
 
     def set(self, offset, value, length=1):
-        pwrite(self.fd.fileno(), value.to_bytes(length, 'little'), offset)
+        if pwrite(self.fd.fileno(), value.to_bytes(length, 'little'), offset) != length:
+            raise RuntimeError('Failed to write to register')
 
     def get(self, offset, length=1):
         return int.from_bytes(pread(self.fd.fileno(), length, offset), 'little')

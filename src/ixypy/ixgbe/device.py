@@ -126,14 +126,10 @@ class IxgbeDevice(IxyDevice):
         mempool should be >= the number of rx and tx descriptors for a forwarding application
         """
         log.info('Starting RX queue %d', queue.identifier)
-        # Mempool should be >= number of rx and tx descriptors
-        mempool_size = self.NUM_RX_QUEUE_ENTRIES + self.NUM_TX_QUEUE_ENTRIES
-        mempool = Mempool.allocate(4096 if mempool_size < 4096 else mempool_size)
-        queue.mempool = mempool
-        if queue.num_descriptors & (queue.num_descriptors - 1) != 0:
-            raise ValueError('Number of queue entries must be a power of 2, actual {}'.format(queue.num_descriptors))
+        if len(queue) & (len(queue) - 1) != 0:
+            raise ValueError('Number of queue entries must be a power of 2, actual {}'.format(len(queue)))
         for i, descriptor in enumerate(queue.descriptors):
-            pkt_buf = mempool.get_buffer()
+            pkt_buf = queue.mempool.get_buffer()
             if not pkt_buf:
                 raise ValueError('Failed to allocate rx descriptor')
             descriptor.read.pkt_addr = pkt_buf.physical_address + pkt_buf.data_offset
@@ -147,7 +143,7 @@ class IxgbeDevice(IxyDevice):
         self.reg.set(types.IXGBE_RDH(queue.identifier), 0)
 
         # was set to 0 before in the init function
-        self.reg.set(types.IXGBE_RDT(queue.identifier), queue.num_descriptors - 1)
+        self.reg.set(types.IXGBE_RDT(queue.identifier), len(queue) - 1)
 
     def _init_rx(self):
         """Sec 4.6.7"""
@@ -210,12 +206,15 @@ class IxgbeDevice(IxyDevice):
         # Set ring to empty
         self.reg.set(types.IXGBE_RDH(index), 0)
         self.reg.set(types.IXGBE_RDT(index), 0)
-        queue = RxQueue(memoryview(mem), self.NUM_RX_QUEUE_ENTRIES, index)
+        # Mempool should be >= number of rx and tx descriptors
+        mempool_size = self.NUM_RX_QUEUE_ENTRIES + self.NUM_TX_QUEUE_ENTRIES
+        mempool = Mempool.allocate(4096 if mempool_size < 4096 else mempool_size)
+        queue = RxQueue(memoryview(mem), self.NUM_RX_QUEUE_ENTRIES, index, mempool)
         return queue
 
     def _start_tx_queue(self, queue):
         log.info('Starting tx queue %d', queue.identifier)
-        if queue.num_descriptors & (queue.num_descriptors - 1) != 0:
+        if (len(queue) & (len(queue) - 1)) != 0:
             raise ValueError('Numberof queue entries must be a power of 2')
         # tx queue starts out empty
         self.reg.set(types.IXGBE_TDH(queue.identifier), 0)
@@ -305,7 +304,7 @@ class IxgbeDevice(IxyDevice):
 
                 # want to read the next one in the next iteration but we still need the current one to update RDT later
                 last_rx_index = rx_index
-                rx_index = wrap_ring(rx_index, queue.num_descriptors)
+                rx_index = wrap_ring(rx_index, len(queue))
             else:
                 break
         if rx_index != last_rx_index:

@@ -1,6 +1,7 @@
 from os import getuid
 import logging as log
 from abc import ABC, abstractmethod
+from struct import Struct, calcsize, pack_into
 
 
 def is_running_as_root():
@@ -15,6 +16,43 @@ class IxyQueueSizeException(IxyException):
     def __init__(self, given_queue_num):
         super().__init__('Cannot configure queue: limit is {:d}'
                          .format(given_queue_num))
+
+
+class IxyQueue(object):
+    def __init__(self, memory, size, identifier, mempool):
+        self.memory = memory
+        self.size = size
+        self.buffers = [None]*size
+        self.identifier = identifier
+        self.index = 0
+        self.mempool = mempool
+
+    def _get_descriptors(self, descriptor_class):
+        desc_size = descriptor_class.byte_size()
+        return [descriptor_class(self.memory[i*desc_size:desc_size*(i+1)]) for i in range(self.size)]
+
+    def __len__(self):
+        return self.size
+
+
+class IxyStruct(object):
+    def __init__(self, mem):
+        self.mem = mem
+        self.data_struct = Struct(self.data_format)
+
+    def _pack_into(self, value, field_format, prefix=''):
+        offset = calcsize(prefix)
+        pack_into(field_format, self.mem, offset, value)
+
+    def _unpack(self):
+        return self.data_struct.unpack(self.mem)
+
+    def __len__(self):
+        return self.data_struct.size
+
+    @classmethod
+    def byte_size(cls):
+        return calcsize(cls.data_format)
 
 
 class IxyDevice(ABC):

@@ -9,7 +9,7 @@ import struct
 import time
 
 log.basicConfig(level=log.DEBUG,
-                format='%(asctime)s %(levelname)-8s %(message)s',
+                format='%(filename)s:%(funcName)s:%(lineno)d %(levelname)-15s %(message)s',
                 datefmt='%a, %d %b %Y %H:%M:%S')
 
 
@@ -46,7 +46,8 @@ pkt_data = bytearray([
     # udp checksum, optional
     0x00, 0x00,
     # payload
-    1, 2, 3
+    ord('i'), ord('x'), ord('y')
+    # 1, 2, 3
     # rest of the payload is zero-filled because mempools guarantee empty bufs
 ])
 
@@ -73,7 +74,7 @@ def init_mempool():
         buff = mempool.get_buffer()
         buff.size = PKT_SIZE
         buff.data_buffer[:len(pkt_data)] = memoryview(pkt_data)
-        cs = calc_ip_checksum(buff.data_buffer[14:])
+        cs = calc_ip_checksum(buff.data_buffer[14:34])
         struct.pack_into('H', buff.data_buffer, 24, cs)
         buffs.append(buff)
     for buff in buffs:

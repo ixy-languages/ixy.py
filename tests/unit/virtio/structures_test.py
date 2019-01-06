@@ -1,7 +1,7 @@
 import struct
 from unittest.mock import Mock
 
-from ixypy.virtio.structures import VRing, VRingDescriptor, VRingAvailable, RingList,\
+from ixypy.virtio.structures import VRing, VRingDescriptor, Available, RingList,\
                                     VRingUsedElement, VRingUsed, VirtioNetworkControl,\
                                     PromiscuousModeCommand
 
@@ -128,7 +128,7 @@ class TestRingList(object):
         return struct.calcsize('{:d}H'.format(index))
 
 
-class TestVRingAvailable(object):
+class TestAvailable(object):
     size = 10
     data_format = 'H H {:d}H xx'.format(size)
     flags = 99
@@ -138,7 +138,7 @@ class TestVRingAvailable(object):
     def test_ring_available_read(self):
         data = memoryview(bytearray(struct.calcsize(self.data_format)))
 
-        vring_available = VRingAvailable(data, self.size)
+        vring_available = Available(data, self.size)
 
         data = struct.pack_into(self.data_format, data, 0, self.flags, self.index, *self.rings)
 
@@ -150,7 +150,7 @@ class TestVRingAvailable(object):
     def test_ring_available_write(self):
         data = bytearray(struct.pack(self.data_format, 0, 0, *[0]*self.size))
 
-        vring_available = VRingAvailable(memoryview(data), self.size)
+        vring_available = Available(memoryview(data), self.size)
 
         vring_available.flags = self.flags
         vring_available.index = self.index

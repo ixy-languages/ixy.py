@@ -1,31 +1,25 @@
-from struct import Struct, calcsize, pack_into, unpack_from
+from struct import Struct, calcsize, pack_into
+from ixypy.ixy import IxyQueue
 
 
-class Queue(object):
-    def __init__(self, memory, num_descriptors, identifier):
-        self.memory = memory
-        self.num_descriptors = num_descriptors
-        self.buffers = [None]*num_descriptors
-        self.identifier = identifier
-        self.index = 0
+class IxgbeQueue(IxyQueue):
+    def __init__(self, memory, size, identifier, mempool=None):
+        super().__init__(memory, size, identifier, mempool)
 
     def _get_descriptors(self, descriptor_class):
         desc_size = descriptor_class.byte_size()
-        return [descriptor_class(self.memory[i*desc_size:desc_size*(i+1)]) for i in range(self.num_descriptors)]
-
-    def __len__(self):
-        return self.num_descriptors
+        return [descriptor_class(self.memory[i*desc_size:desc_size*(i+1)]) for i in range(self.size)]
 
 
-class RxQueue(Queue):
-    def __init__(self, memory, num_descriptors, identifier):
-        super().__init__(memory, num_descriptors, identifier)
+class RxQueue(IxgbeQueue):
+    def __init__(self, memory, size, identifier, mempool):
+        super().__init__(memory, size, identifier, mempool)
         self.descriptors = self._get_descriptors(RxDescriptor)
 
 
-class TxQueue(Queue):
-    def __init__(self, memory, num_descriptors, identifier):
-        super().__init__(memory, num_descriptors, identifier)
+class TxQueue(IxgbeQueue):
+    def __init__(self, memory, size, identifier):
+        super().__init__(memory, size, identifier)
         self.clean_index = 0
         self.descriptors = self._get_descriptors(TxDescriptor)
 

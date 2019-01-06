@@ -12,12 +12,12 @@ SIZE_PKT_BUF_HEADROOM = 40
 
 class Stack(object):
     def __init__(self, size):
-        self.max_size = size
+        self.size = size
         self.top = 0
         self.items = [None]*size
 
     def push(self, item):
-        if self.top < self.max_size:
+        if self.top < self.size:
             self.items[self.top - 1] = item
             self.top += 1
         else:
@@ -57,9 +57,8 @@ class Mempool(object):
     def free(self):
         del Mempool.pools[self.identifier]
 
-    def _gen_buffers(self):
+    def _gen_buffers(self, mem):
         i = 0
-        mem = memoryview(self.dma)
         while i < self.num_entries:
             offset = i*self.buffer_size
             physical_address = self.dma.get_physical_address(offset)
@@ -71,7 +70,10 @@ class Mempool(object):
             i += 1
 
     def preallocate_buffers(self):
-        for buff in self._gen_buffers():
+        mem = memoryview(self.dma)
+        for i, _ in enumerate(mem):
+            mem[i] = 0x00
+        for buff in self._gen_buffers(mem):
             self._buffers.push(buff)
 
     def get_buffer(self):
@@ -82,7 +84,7 @@ class Mempool(object):
 
     def get_buffers(self, num_buffers):
         num = num_buffers if num_buffers <= len(self._buffers) else len(self._buffers)
-        return [self.get_buffer() for _ in range(num)]
+        return [self._buffers.pop() for _ in range(num)]
 
     def free_buffer(self, buffer):
         self._buffers.push(buffer)
@@ -107,7 +109,7 @@ class Mempool(object):
         mempool.preallocate_buffers()
         return mempool
 
-
+pkt_dump_count = 0
 class PacketBuffer(object):
     data_format = 'Q 8x I I 40x'
     # data_offset = 64
@@ -118,6 +120,13 @@ class PacketBuffer(object):
         self.data_buffer = buffer[self.struct.size:]
         # data: Q 8x I I ==> 24
         self.head_room_buffer = buffer[calcsize('Q 8x I I'):self.struct.size]
+
+    def dump(self):
+        global pkt_dump_count
+        with open('dumps/buffs/buff_{:d}'.format(pkt_dump_count), 'wb') as f:
+            f.write(self.buffer)
+            pkt_dump_count += 1
+
 
     @property
     def physical_address(self):
