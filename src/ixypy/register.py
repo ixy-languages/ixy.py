@@ -94,3 +94,8 @@ class MmapRegister(object):
         while (current & mask) != mask:
             time.sleep(0.01)
             current = self.get(offset)
+
+    def dump(self):
+        with open('registers', 'wb') as f:
+            f.write(self.mem_buffer)
+

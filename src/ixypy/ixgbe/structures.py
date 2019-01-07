@@ -12,16 +12,30 @@ class IxgbeQueue(IxyQueue):
 
 
 class RxQueue(IxgbeQueue):
+    dump_count = 0
+
     def __init__(self, memory, size, identifier, mempool):
         super().__init__(memory, size, identifier, mempool)
         self.descriptors = self._get_descriptors(RxDescriptor)
 
+    def dump(self):
+        with open('dumps/queue/rx_{:d}'.format(self.dump_count), 'wb') as f:
+                  f.write(self.memory)
+        RxQueue.dump_count += 1
+
 
 class TxQueue(IxgbeQueue):
+    dump_count = 0
+
     def __init__(self, memory, size, identifier):
         super().__init__(memory, size, identifier)
         self.clean_index = 0
         self.descriptors = self._get_descriptors(TxDescriptor)
+
+    def dump(self):
+        with open('dumps/queue/tx_{:d}'.format(self.dump_count), 'wb') as f:
+                  f.write(self.memory)
+        TxQueue.dump_count += 1
 
 
 class IxgbeStruct(object):
@@ -123,19 +137,27 @@ class TxDescriptorWriteback(IxgbeStruct):
 
 
 class TxDescriptor(IxgbeStruct):
+    dump_count = 0
+
     def __init__(self, buffer):
+        self.buffer = buffer
         self.read = TxDescriptorRead(buffer)
         self.writeback = TxDescriptorWriteback(buffer)
 
     def __str__(self):
         return '{} {}'.format(self.read, self.writeback)
-    
+
     def __repr__(self):
         return str(self)
 
     @staticmethod
     def byte_size():
         return 16
+
+    def dump(self):
+        with open('dumps/tx_dsc/tx_dsc_{:d}'.format(self.dump_count), 'wb') as f:
+            f.write(self.buffer)
+        TxDescriptor.dump_count += 1
 
 
 class RxDescriptorRead(IxgbeStruct):
@@ -341,10 +363,17 @@ class RxDescriptorWriteback(object):
 
 class RxDescriptor(object):
     """Advanced Receive Descriptor Sec. 7.1.6"""
+    dump_count = 0
     def __init__(self, buffer):
+        self.buffer = buffer
         self.read = RxDescriptorRead(buffer)
         self.writeback = RxDescriptorWriteback(buffer)
 
     @staticmethod
     def byte_size():
         return 16
+
+    def dump(self):
+        with open('dumps/rx_dsc/rx_dsc_{:d}'.format(self.dump_count), 'wb') as f:
+            f.write(self.buffer)
+        RxDescriptor.dump_count += 1

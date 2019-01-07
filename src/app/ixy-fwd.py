@@ -13,15 +13,15 @@ log.basicConfig(level=log.DEBUG,
                 datefmt='%a, %d %b %Y %H:%M:%S')
 
 
-BATCH_SIZE = 32 
+BATCH_SIZE = 64
 
-pkt_counter = 1 
+pkt_counter = 0
 
 
 def forward(rx_dev, rx_queue, tx_dev, tx_queue):
     global pkt_counter
     rx_buffers = rx_dev.rx_batch(rx_queue, BATCH_SIZE)
-
+    mempool = None
     if rx_buffers:
         for buff in rx_buffers:
             buff.touch()
@@ -34,8 +34,9 @@ def forward(rx_dev, rx_queue, tx_dev, tx_queue):
         out: either wait on tx or drop them; in this case it's better to drop
         them, otherwise we accumulate latency
         """
-        for buff in rx_buffers[tx_buffer_count:len(rx_buffers)]:
-            mempool = Mempool.pools[buff.mempool_id]
+        for buff in rx_buffers[tx_buffer_count:]:
+            if mempool is None:
+                mempool = Mempool.pools[buff.mempool_id]
             mempool.free_buffer(buff)
 
 
