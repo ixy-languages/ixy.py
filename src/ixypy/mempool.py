@@ -10,6 +10,10 @@ HUGE_PAGE_SIZE = 1 << HUGE_PAGE_BITS
 SIZE_PKT_BUF_HEADROOM = 40
 
 
+class StackException(Exception):
+    pass
+
+
 class Stack(object):
     def __init__(self, size):
         self.size = size
@@ -21,11 +25,11 @@ class Stack(object):
             self.items[self.top - 1] = item
             self.top += 1
         else:
-            raise MemoryError('Stack overflow')
+            raise StackException('Stack overflow')
 
     def pop(self):
         if self.top == 0:
-            raise MemoryError('Empty stack')
+            raise StackException('Empty stack')
         self.top -= 1
         return self.items[self.top]
 
@@ -77,10 +81,10 @@ class Mempool(object):
             self._buffers.push(buff)
 
     def get_buffer(self):
-        if len(self._buffers) == 0:
-            log.warning('No memory buffers left in pool %d', self.identifier)
-        else:
+        try:
             return self._buffers.pop()
+        except StackException:
+            log.exception('No memory buffers left in pool %d', self.identifier)
 
     def get_buffers(self, num_buffers):
         num = num_buffers if num_buffers <= len(self._buffers) else len(self._buffers)

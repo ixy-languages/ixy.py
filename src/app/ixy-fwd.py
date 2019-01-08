@@ -13,9 +13,7 @@ log.basicConfig(level=log.DEBUG,
                 datefmt='%a, %d %b %Y %H:%M:%S')
 
 
-BATCH_SIZE = 64
-
-pkt_counter = 0
+BATCH_SIZE = 32
 
 
 def forward(rx_dev, rx_queue, tx_dev, tx_queue):
@@ -27,7 +25,6 @@ def forward(rx_dev, rx_queue, tx_dev, tx_queue):
             buff.touch()
 
         tx_buffer_count = tx_dev.tx_batch(rx_buffers, tx_queue)
-        pkt_counter += tx_buffer_count
 
         """
         there are two ways to handle the case that packets are not being sent
@@ -66,7 +63,6 @@ def run_packet_forwarding(args):
                     stats_2_new.print_diff(stats_2_old, interval)
                     stats_2_old = copy.copy(stats_2_new)
                 last_stats_printed = current_time
-                log.info('Pkt counter = %d', pkt_counter)
         counter += 1
 
 

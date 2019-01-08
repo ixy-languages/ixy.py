@@ -195,7 +195,6 @@ class VirtioLegacyDevice(IxyDevice):
         while vq.used_last_index == vring.used.index:
             time.sleep(1)
         vq.used_last_index += 1
-        vq.vring.dump()
         log.debug('Retrieved used element')
         log.debug('Used buff index => %d', vring.used.index)
         used_element = vring.used.rings[vring.used.index]
