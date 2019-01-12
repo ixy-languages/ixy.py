@@ -103,8 +103,9 @@ class VirtioRegister(object):
 
 
 class MmapRegister(object):
-    def __init__(self, mem_buffer):
-        self.mem_buffer = mem_buffer
+    def __init__(self, mm):
+        self.mm = mm
+        self.mem_buffer = memoryview(mm)
 
     def set(self, offset, value):
         pack_into('I', self.mem_buffer, offset, value & 0xFFFFFFFF)

@@ -1,4 +1,3 @@
-
 import time
 import logging as log
 
@@ -65,8 +64,8 @@ class VirtioLegacyDevice(IxyDevice):
     def rx_batch(self, queue_id, batch_size):
         vq = self.rx_queues[0]
         buffs = []
-        for i in range(batch_size):
-            buff_indx = i
+        # Read buffers from rx queue
+        for _ in range(batch_size):
             if vq.used_last_index == vq.vring.used.index:
                 break
             used_element = vq.vring.used.rings[vq.used_last_index % vq.vring.size]
@@ -92,8 +91,6 @@ class VirtioLegacyDevice(IxyDevice):
             vq.buffers[index] = pkt_buf
             vq.vring.available.rings[vq.vring.available.index % vq.vring.size] = index
             vq.vring.available.index += 1
-            self.rx_pkts += 1
-            self.rx_bytes = pkt_buf.size
             self._notify_queue(0)
         return buffs
 
@@ -110,8 +107,6 @@ class VirtioLegacyDevice(IxyDevice):
             desc = vq.vring.descriptors[idx]
             desc.address = 0
             desc.length = 0
-            self.tx_bytes += buff.size
-            self.tx_pkts += 1
             if not mempool:
                 mempool = Mempool.pools[buff.mempool_id]
             mempool.free_buffer(buff)
@@ -137,6 +132,9 @@ class VirtioLegacyDevice(IxyDevice):
                 desc.next_descriptor = 0
                 vq.vring.available.rings[index] = index
                 buffer_index += 1
+                self.tx_bytes += buffer.size
+                self.tx_pkts += 1
+                buffer.dump()
         vq.vring.available.index += buffer_index
         self._notify_queue(vq.identifier)
         return buffer_index

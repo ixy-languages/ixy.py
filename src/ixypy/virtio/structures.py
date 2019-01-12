@@ -29,9 +29,6 @@ class VQueue(IxyQueue):
             desc = self.vring.descriptors[i]
             if desc.address == 0:
                 return i, desc
-        # for index, descriptor in enumerate(self.vring.descriptors):
-            # if descriptor.address == 0:
-                # return index, descriptor
         raise VirtioException('Queue overflow')
 
     def free_descriptors(self):
@@ -64,7 +61,6 @@ class VirtioNetworkHeader(object):
 
     def __len__(self):
         return self.byte_size()
-        return self.struct.size
 
     @staticmethod
     def byte_size():
@@ -225,44 +221,36 @@ class VRingDescriptor(IxyStruct):
 
     @property
     def address(self):
-        # return self._unpack()[0]
         return unpack_from('Q', self.mem, 0)[0]
 
     @address.setter
     def address(self, address):
         pack_into('Q', self.mem, 0, address)
-        # self._pack_into(address, 'Q')
 
     @property
     def length(self):
-        # return self._unpack()[1]
         return unpack_from('I', self.mem, 8)[0]
 
     @length.setter
     def length(self, length):
-        # self._pack_into(length, 'I', 'Q')
         # Q ==> 8
         pack_into('I', self.mem, 8, length)
 
     @property
     def flags(self):
-        # return self._unpack()[2]
         return unpack_from('H', self.mem, 12)[0]
 
     @flags.setter
     def flags(self, flags):
-        # self._pack_into(flags, 'H', 'Q I')
         # Q I ==> 12
         pack_into('H', self.mem, 12, flags)
 
     @property
     def next_descriptor(self):
-        # return self._unpack()[3]
         return unpack_from('H', self.mem, 14)[0]
 
     @next_descriptor.setter
     def next_descriptor(self, next_descriptor):
-        # self._pack_into(next_descriptor, 'H', 'Q I H')
         # Q I H ==> 14
         pack_into('H', self.mem, 14, next_descriptor)
 
@@ -284,23 +272,19 @@ class Available(object):
 
     @property
     def flags(self):
-        # return self._unpack()[0]
         return unpack_from('H', self.buffer, 0)[0]
 
     @flags.setter
     def flags(self, flags):
-        # self._pack_into_buffer(flags, 'H')
         pack_into('H', self.buffer, 0, flags)
 
     @property
     def index(self):
         return unpack_from('H', self.buffer, 2)[0]
-        # return self._unpack()[1]
 
     @index.setter
     def index(self, index):
         index = index % 0xFFFF
-        # self._pack_into_buffer(index, 'H', 'H')
         pack_into('H', self.buffer, 2, index)
 
     @staticmethod
@@ -312,8 +296,7 @@ class Available(object):
          uint16_t available[num];
          uint16_t used_event_idx;
         """
-        # return calcsize('H H {:d}H H'.format(queue_size))
-        return 6 + 2 * queue_size
+        return 4 + 2 * queue_size
 
     def __str__(self):
         return 'size={} buffer_size={}'.format(self.size, len(self.buffer))
@@ -389,7 +372,6 @@ class VRingUsedElement(object):
     @id.setter
     def id(self, _id):
         pack_into('I', self.buffer, 0, _id)
-        # self._pack_into_buffer(_id, 'I')
 
     @property
     def length(self):
@@ -399,13 +381,11 @@ class VRingUsedElement(object):
     def length(self, length):
         # I ==> 4
         pack_into('I', self.buffer, 4, length)
-        # self._pack_into_buffer(length, 'I', 'I')
 
     @staticmethod
     def byte_size():
         # I I ==> 8
         return 8
-        # return calcsize(VRingUsedElement.data_format)
 
     def _unpack(self):
         return self.struct.unpack(self.buffer)
@@ -437,7 +417,6 @@ class VRingUsed(object):
     @flags.setter
     def flags(self, flags):
         pack_into('H', self.buffer, 0, flags)
-        # self._pack_into_buffer(flags, 'H')
 
     @property
     def index(self):
@@ -447,7 +426,6 @@ class VRingUsed(object):
     def index(self, index):
         # H ==> 2
         pack_into('H', self.buffer, 2, index)
-        # self._pack_into_buffer(index, 'H', 'H')
 
     def _pack_into_buffer(self, value, field_format, prefix=''):
         offset = calcsize(prefix)

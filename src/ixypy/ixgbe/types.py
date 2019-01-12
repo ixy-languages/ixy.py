@@ -148,6 +148,7 @@ IXGBE_DMATXCTL_MBINTEN = 0x40
 IXGBE_DMATXCTL_VT_SHIFT = 16
 
 
+# Transmit DMA registers
 def IXGBE_TDBAL(i):
     # 32 of them (0-31
     return 0x06000 + i * 0x40

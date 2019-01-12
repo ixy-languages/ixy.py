@@ -10,10 +10,6 @@ HUGE_PAGE_SIZE = 1 << HUGE_PAGE_BITS
 SIZE_PKT_BUF_HEADROOM = 40
 
 
-class StackException(Exception):
-    pass
-
-
 class Stack(object):
     def __init__(self, size):
         self.size = size
@@ -21,15 +17,10 @@ class Stack(object):
         self.items = [None]*size
 
     def push(self, item):
-        if self.top < self.size:
-            self.items[self.top - 1] = item
-            self.top += 1
-        else:
-            raise StackException('Stack overflow')
+        self.items[self.top] = item
+        self.top += 1
 
     def pop(self):
-        if self.top == 0:
-            raise StackException('Empty stack')
         self.top -= 1
         return self.items[self.top]
 
@@ -62,16 +53,14 @@ class Mempool(object):
         del Mempool.pools[self.identifier]
 
     def _gen_buffers(self, mem):
-        i = 0
-        while i < self.num_entries:
+        base_phy_address = self.dma.physical_address
+        for i in range(self.num_entries):
             offset = i*self.buffer_size
-            physical_address = self.dma.get_physical_address(offset)
             buff = PacketBuffer(mem[offset:offset + self.buffer_size])
             buff.mempool_id = self.identifier
-            buff.physical_address = physical_address
+            buff.physical_address = base_phy_address + offset
             buff.size = 0
             yield buff
-            i += 1
 
     def preallocate_buffers(self):
         mem = memoryview(self.dma)
@@ -83,15 +72,17 @@ class Mempool(object):
     def get_buffer(self):
         try:
             return self._buffers.pop()
-        except StackException:
+        except IndexError:
             log.exception('No memory buffers left in pool %d', self.identifier)
 
     def get_buffers(self, num_buffers):
         num = num_buffers if num_buffers <= len(self._buffers) else len(self._buffers)
         return [self._buffers.pop() for _ in range(num)]
 
-    def free_buffer(self, buffer):
-        self._buffers.push(buffer)
+    def free_buffer(self, buff):
+        if buff.mempool_id != self.identifier:
+            raise RuntimeException("Wrong pool id")
+        self._buffers.push(buff)
 
     @staticmethod
     def add_pool(mempool):
@@ -169,8 +160,13 @@ class PacketBuffer(object):
         return self.physical_address + self.data_offset
 
     def touch(self):
-        current_val = self.buffer[self.data_offset + 1]
-        self.buffer[self.data_offset + 1] = (current_val + 1) % 0xFF
+        # current_val = self.buffer[self.data_offset + 1]
+        # self.buffer[self.data_offset + 1] = (current_val + 1) % 0xFF
+        current_val = self.buffer[48]
+        self.buffer[48] = (current_val + 1) % 0xFF
+
+    def __repr__(self):
+        return str(self)
 
     def __str__(self):
         return 'PktBuff(phy_addr={:02X}, mempool_id={:d}, size={:d}, data_addr=0x{:02X})'.format(

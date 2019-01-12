@@ -13,12 +13,12 @@ log.basicConfig(level=log.DEBUG,
                 datefmt='%a, %d %b %Y %H:%M:%S')
 
 
-BATCH_SIZE = 32
+BATCH_SIZE = 40 
 
 
 def forward(rx_dev, rx_queue, tx_dev, tx_queue):
-    global pkt_counter
     rx_buffers = rx_dev.rx_batch(rx_queue, BATCH_SIZE)
+
     mempool = None
     if rx_buffers:
         for buff in rx_buffers:
@@ -69,8 +69,8 @@ def run_packet_forwarding(args):
 def main():
     parser = argparse.ArgumentParser()
     pci_address_eg = '0000:00:08.0'
-    parser.add_argument('pci_2', help='Pci bus id2 e.g. {}'.format(pci_address_eg), type=str)
     parser.add_argument('pci_1', help='Pci bus id1 e.g. {}'.format(pci_address_eg), type=str)
+    parser.add_argument('pci_2', help='Pci bus id2 e.g. {}'.format(pci_address_eg), type=str)
     args = parser.parse_args()
     try:
         run_packet_forwarding(args)
