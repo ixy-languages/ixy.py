@@ -17,15 +17,10 @@ class Stack(object):
         self.items = [None]*size
 
     def push(self, item):
-        if self.top < self.size:
-            self.items[self.top - 1] = item
-            self.top += 1
-        else:
-            raise MemoryError('Stack overflow')
+        self.items[self.top] = item
+        self.top += 1
 
     def pop(self):
-        if self.top == 0:
-            raise MemoryError('Empty stack')
         self.top -= 1
         return self.items[self.top]
 
@@ -38,6 +33,9 @@ class Mempool(object):
 
     def __init__(self, dma, buffer_size, num_entries):
         self.dma = dma
+        self.mem = memoryview(self.dma)
+        for i, _ in enumerate(self.mem):
+            self.mem[i] = 0x00
         self.buffer_size = buffer_size
         self.num_entries = num_entries
         self.identifier = None
@@ -57,37 +55,38 @@ class Mempool(object):
     def free(self):
         del Mempool.pools[self.identifier]
 
-    def _gen_buffers(self, mem):
-        i = 0
-        while i < self.num_entries:
+    def _gen_buffers(self):
+        base_phy_address = self.dma.physical_address
+        for i in range(self.num_entries):
             offset = i*self.buffer_size
-            physical_address = self.dma.get_physical_address(offset)
-            buff = PacketBuffer(mem[offset:offset + self.buffer_size])
+            buff = PacketBuffer(self.mem[offset:offset + self.buffer_size])
             buff.mempool_id = self.identifier
-            buff.physical_address = physical_address
+            buff.physical_address = base_phy_address + offset
             buff.size = 0
             yield buff
-            i += 1
 
     def preallocate_buffers(self):
-        mem = memoryview(self.dma)
-        for i, _ in enumerate(mem):
-            mem[i] = 0x00
-        for buff in self._gen_buffers(mem):
+        for buff in self._gen_buffers():
             self._buffers.push(buff)
 
     def get_buffer(self):
-        if len(self._buffers) == 0:
-            log.warning('No memory buffers left in pool %d', self.identifier)
-        else:
+        try:
             return self._buffers.pop()
+        except IndexError:
+            log.exception('No memory buffers left in pool %d', self.identifier)
 
     def get_buffers(self, num_buffers):
         num = num_buffers if num_buffers <= len(self._buffers) else len(self._buffers)
         return [self._buffers.pop() for _ in range(num)]
 
-    def free_buffer(self, buffer):
-        self._buffers.push(buffer)
+    def free_buffer(self, buff):
+        self._buffers.push(buff)
+    
+    def dump(self):
+        with open('buffers_{:d}.txt'.format(self.identifier), 'w+') as f:
+            for i, b in enumerate(self._buffers.items):
+                f.write('{:d}   {}\n'.format(i, b))
+            f.write('TOP = ' + str(self._buffers.top) + '\n')
 
     @staticmethod
     def add_pool(mempool):
@@ -109,7 +108,7 @@ class Mempool(object):
         mempool.preallocate_buffers()
         return mempool
 
-pkt_dump_count = 0
+
 class PacketBuffer(object):
     data_format = 'Q 8x I I 40x'
     data_offset = calcsize(data_format)
@@ -121,12 +120,6 @@ class PacketBuffer(object):
         self.data_buffer = buffer[self.struct.size:]
         # data: Q 8x I I ==> 24
         self.head_room_buffer = buffer[self.head_room_offset:self.struct.size]
-
-    def dump(self):
-        global pkt_dump_count
-        with open('dumps/buffs/buff_{:d}'.format(pkt_dump_count), 'wb') as f:
-            f.write(self.buffer)
-            pkt_dump_count += 1
 
     @property
     def physical_address(self):
@@ -140,33 +133,32 @@ class PacketBuffer(object):
     def mempool_id(self):
         # offset: Q 8x => 16
         return unpack_from('I', self.buffer, 16)[0]
-        # return unpack_from('I', self.buffer, calcsize('Q 8x'))[0]
 
     @mempool_id.setter
     def mempool_id(self, mempool_id):
         # offset: Q 8x => 16
         pack_into('I', self.buffer, 16, mempool_id)
-        # pack_into('I', self.buffer, calcsize('Q 8x'), mempool_id)
 
     @property
     def size(self):
         # offset: Q 8x I => 20
         return unpack_from('I', self.buffer, 20)[0]
-        # return unpack_from('I', self.buffer, calcsize('Q 8x I'))[0]
 
     @size.setter
     def size(self, size):
         # offset: Q 8x I => 20
         pack_into('I', self.buffer, 20, size)
-        # pack_into('I', self.buffer, calcsize('Q 8x I'), size)
 
     @property
     def data_addr(self):
         return self.physical_address + self.data_offset
 
     def touch(self):
-        current_val = self.buffer[self.data_offset + 1]
-        self.buffer[self.data_offset + 1] = (current_val + 1) % 0xFF
+        current_val = self.buffer[48]
+        self.buffer[48] = (current_val + 1) % 0xFF
+
+    def __repr__(self):
+        return str(self)
 
     def __str__(self):
         return 'PktBuff(phy_addr={:02X}, mempool_id={:d}, size={:d}, data_addr=0x{:02X})'.format(

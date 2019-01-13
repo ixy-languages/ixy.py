@@ -15,27 +15,25 @@ log.basicConfig(level=log.DEBUG,
 
 BATCH_SIZE = 32 
 
-pkt_counter = 1 
-
 
 def forward(rx_dev, rx_queue, tx_dev, tx_queue):
-    global pkt_counter
     rx_buffers = rx_dev.rx_batch(rx_queue, BATCH_SIZE)
 
+    mempool = None
     if rx_buffers:
         for buff in rx_buffers:
             buff.touch()
 
         tx_buffer_count = tx_dev.tx_batch(rx_buffers, tx_queue)
-        pkt_counter += tx_buffer_count
 
         """
         there are two ways to handle the case that packets are not being sent
         out: either wait on tx or drop them; in this case it's better to drop
         them, otherwise we accumulate latency
         """
-        for buff in rx_buffers[tx_buffer_count:len(rx_buffers)]:
-            mempool = Mempool.pools[buff.mempool_id]
+        for buff in rx_buffers[tx_buffer_count:]:
+            if mempool is None:
+                mempool = Mempool.pools[buff.mempool_id]
             mempool.free_buffer(buff)
 
 
@@ -65,15 +63,14 @@ def run_packet_forwarding(args):
                     stats_2_new.print_diff(stats_2_old, interval)
                     stats_2_old = copy.copy(stats_2_new)
                 last_stats_printed = current_time
-                log.info('Pkt counter = %d', pkt_counter)
         counter += 1
 
 
 def main():
     parser = argparse.ArgumentParser()
     pci_address_eg = '0000:00:08.0'
-    parser.add_argument('pci_2', help='Pci bus id2 e.g. {}'.format(pci_address_eg), type=str)
     parser.add_argument('pci_1', help='Pci bus id1 e.g. {}'.format(pci_address_eg), type=str)
+    parser.add_argument('pci_2', help='Pci bus id2 e.g. {}'.format(pci_address_eg), type=str)
     args = parser.parse_args()
     try:
         run_packet_forwarding(args)

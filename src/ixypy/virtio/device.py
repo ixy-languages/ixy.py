@@ -1,4 +1,3 @@
-
 import time
 import logging as log
 
@@ -17,6 +16,8 @@ class VirtioLegacyDevice(IxyDevice):
     net_hdr = VirtioNetworkHeader(flags=0, gso_type=types.VIRTIO_NET_HDR_GSO_NONE, header_len=14 + 20 + 8)
 
     def __init__(self, pci_device):
+        self.rx_pkt_count = 0
+        self.tx_pkt_count  = 0
         # Supporting at most 1 tx/rx queue
         super().__init__(pci_device, 'ixypy-virtio')
         self._verify_is_legacy()
@@ -65,20 +66,28 @@ class VirtioLegacyDevice(IxyDevice):
     def rx_batch(self, queue_id, batch_size):
         vq = self.rx_queues[0]
         buffs = []
-        for i in range(batch_size):
-            buff_indx = i
-            if vq.used_last_index == vq.vring.used.index:
+        vring_last_used_index = vq.vring.used.index
+        # Read buffers from rx queue
+        for _ in range(batch_size):
+            if vq.used_last_index == vring_last_used_index:
                 break
             used_element = vq.vring.used.rings[vq.used_last_index % vq.vring.size]
-            desc = vq.vring.descriptors[used_element.id]
+            used_element_id = used_element.id
+            desc = vq.vring.descriptors[used_element_id]
             vq.used_last_index += 1
+            self.rx_pkt_count += 1
             if desc.flags != types.VRING_DESC_F_WRITE:
                 log.error("Unsupported rx flags on descriptor: %x", desc.flags)
+                with open('log.txt', 'a+') as f:
+                    f.write('{:d}\n'.format(self.rx_pkt_count))
+                # desc.dump()
+                vq.buffers[used_element.id].dump()
             desc.reset()
-            buf = vq.buffers[used_element.id]
+            buf = vq.buffers[used_element_id]
             buffs.append(buf)
-            buf.size = used_element.length
-            self.rx_bytes += buf.size
+            buff_size = used_element.length
+            buf.size = buff_size
+            self.rx_bytes += buff_size
             self.rx_pkts += 1
 
         for index, desc in vq.free_descriptors():
@@ -86,14 +95,12 @@ class VirtioLegacyDevice(IxyDevice):
             pkt_buf.size = vq.mempool.buffer_size
             self.net_hdr.to_buffer(pkt_buf.head_room_buffer[-len(self.net_hdr):])
             desc.length = pkt_buf.size + len(self.net_hdr)
-            desc.address = pkt_buf.data_addr
+            desc.address = pkt_buf.data_addr - len(self.net_hdr)
             desc.flags = types.VRING_DESC_F_WRITE
             desc.next = 0
             vq.buffers[index] = pkt_buf
             vq.vring.available.rings[vq.vring.available.index % vq.vring.size] = index
             vq.vring.available.index += 1
-            self.rx_pkts += 1
-            self.rx_bytes = pkt_buf.size
             self._notify_queue(0)
         return buffs
 
@@ -110,8 +117,6 @@ class VirtioLegacyDevice(IxyDevice):
             desc = vq.vring.descriptors[idx]
             desc.address = 0
             desc.length = 0
-            self.tx_bytes += buff.size
-            self.tx_pkts += 1
             if not mempool:
                 mempool = Mempool.pools[buff.mempool_id]
             mempool.free_buffer(buff)
@@ -129,14 +134,17 @@ class VirtioLegacyDevice(IxyDevice):
                 break
             else:
                 vq.buffers[index] = buffer
+                buffer_size = buffer.size
                 self.net_hdr.to_buffer(buffer.head_room_buffer[-len(self.net_hdr):])
-                desc.length = buffer.size + len(self.net_hdr)
+                desc.length = buffer_size + len(self.net_hdr)
                 offset = buffer.data_offset - len(self.net_hdr)
                 desc.address = buffer.physical_address + offset
                 desc.flags = 0
                 desc.next_descriptor = 0
                 vq.vring.available.rings[index] = index
                 buffer_index += 1
+                self.tx_bytes += buffer_size
+                self.tx_pkts += 1
         vq.vring.available.index += buffer_index
         self._notify_queue(vq.identifier)
         return buffer_index
@@ -195,7 +203,6 @@ class VirtioLegacyDevice(IxyDevice):
         while vq.used_last_index == vring.used.index:
             time.sleep(1)
         vq.used_last_index += 1
-        vq.vring.dump()
         log.debug('Retrieved used element')
         log.debug('Used buff index => %d', vring.used.index)
         used_element = vring.used.rings[vring.used.index]

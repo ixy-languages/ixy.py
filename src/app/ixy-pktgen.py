@@ -14,7 +14,7 @@ log.basicConfig(level=log.DEBUG,
 
 
 PKT_SIZE = 60
-BATCH_SIZE = 64
+BATCH_SIZE = 64 
 
 pkt_data = bytearray([
     # dst MAC
@@ -68,7 +68,6 @@ def calc_ip_checksum(msg):
 def init_mempool():
     NUM_BUFS = 2048
     mempool = Mempool.allocate(NUM_BUFS)
-    # mempool.preallocate_buffers()
     buffs = []
     for _ in range(NUM_BUFS):
         buff = mempool.get_buffer()

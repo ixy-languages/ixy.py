@@ -29,9 +29,6 @@ class VQueue(IxyQueue):
             desc = self.vring.descriptors[i]
             if desc.address == 0:
                 return i, desc
-        # for index, descriptor in enumerate(self.vring.descriptors):
-            # if descriptor.address == 0:
-                # return index, descriptor
         raise VirtioException('Queue overflow')
 
     def free_descriptors(self):
@@ -53,23 +50,23 @@ class VirtioNetworkHeader(object):
         self.struct = Struct(self.data_format)
 
     def to_buffer(self, buffer, offset=0):
-        self.struct.pack_into(buffer, offset, *self._fields())
-
-    def _fields(self):
-        return [
-            self.flags,
-            self.gso_type,
-            self.header_len,
-            self.gso_size,
-            self.csum_start,
-            self.csum_offset]
+        self.struct.pack_into(buffer,
+                              offset,
+                              self.flags,
+                              self.gso_type,
+                              self.header_len,
+                              self.gso_size,
+                              self.csum_start,
+                              self.csum_offset)
 
     def __len__(self):
-        return self.struct.size
+        return self.byte_size()
 
     @staticmethod
     def byte_size():
-        return calcsize(VirtioNetworkHeader.data_format)
+        # B B H H H H ==> 10
+        return 10
+        # return calcsize(VirtioNetworkHeader.data_format)
 
 
 class VCommand(object):
@@ -224,42 +221,38 @@ class VRingDescriptor(IxyStruct):
 
     @property
     def address(self):
-        return self._unpack()[0]
+        return unpack_from('Q', self.mem, 0)[0]
 
     @address.setter
     def address(self, address):
         pack_into('Q', self.mem, 0, address)
-        # self._pack_into(address, 'Q')
 
     @property
     def length(self):
-        return self._unpack()[1]
+        return unpack_from('I', self.mem, 8)[0]
 
     @length.setter
     def length(self, length):
-        # self._pack_into(length, 'I', 'Q')
         # Q ==> 8
         pack_into('I', self.mem, 8, length)
 
     @property
     def flags(self):
-        return self._unpack()[2]
+        return unpack_from('H', self.mem, 12)[0]
 
     @flags.setter
     def flags(self, flags):
-        # self._pack_into(flags, 'H', 'Q I')
         # Q I ==> 12
         pack_into('H', self.mem, 12, flags)
 
     @property
     def next_descriptor(self):
-        return self._unpack()[3]
+        return unpack_from('H', self.mem, 14)[0]
 
     @next_descriptor.setter
     def next_descriptor(self, next_descriptor):
-        # self._pack_into(next_descriptor, 'H', 'Q I H')
         # Q I H ==> 14
-        pack_into('H', self.mem, 12, next_descriptor)
+        pack_into('H', self.mem, 14, next_descriptor)
 
     def reset(self):
         self.write(0, 0, 0, 0)
@@ -279,20 +272,20 @@ class Available(object):
 
     @property
     def flags(self):
-        return self._unpack()[0]
+        return unpack_from('H', self.buffer, 0)[0]
 
     @flags.setter
     def flags(self, flags):
-        self._pack_into_buffer(flags, 'H')
+        pack_into('H', self.buffer, 0, flags)
 
     @property
     def index(self):
-        return self._unpack()[1]
+        return unpack_from('H', self.buffer, 2)[0]
 
     @index.setter
     def index(self, index):
         index = index % 0xFFFF
-        self._pack_into_buffer(index, 'H', 'H')
+        pack_into('H', self.buffer, 2, index)
 
     @staticmethod
     def byte_size(queue_size):
@@ -303,7 +296,7 @@ class Available(object):
          uint16_t available[num];
          uint16_t used_event_idx;
         """
-        return calcsize('H H {:d}H H'.format(queue_size))
+        return 4 + 2 * queue_size
 
     def __str__(self):
         return 'size={} buffer_size={}'.format(self.size, len(self.buffer))
@@ -336,7 +329,8 @@ class RingList(object):
 
     @staticmethod
     def _get_offset(index):
-        return calcsize('{:d}H'.format(index))
+        # H ==> 2
+        return 2 * index
 
 
 class RingListIterator(object):
@@ -357,11 +351,11 @@ class RingListIterator(object):
 
 
 class VRingUsedElement(object):
-    format = 'I I'
+    data_format = 'I I'
 
     def __init__(self, buffer):
         self.buffer = buffer
-        self.struct = Struct(VRingUsedElement.format)
+        self.struct = Struct(self.data_format)
 
     @staticmethod
     def create_used_element(buff):
@@ -372,11 +366,12 @@ class VRingUsedElement(object):
 
     @property
     def id(self):
-        return self._unpack()[0]
+        # return self._unpack()[0]
+        return unpack_from('I', self.buffer, 0)[0]
 
     @id.setter
     def id(self, _id):
-        self._pack_into_buffer(_id, 'I')
+        pack_into('I', self.buffer, 0, _id)
 
     @property
     def length(self):
@@ -384,11 +379,13 @@ class VRingUsedElement(object):
 
     @length.setter
     def length(self, length):
-        self._pack_into_buffer(length, 'I', 'I')
+        # I ==> 4
+        pack_into('I', self.buffer, 4, length)
 
     @staticmethod
     def byte_size():
-        return calcsize(VRingUsedElement.format)
+        # I I ==> 8
+        return 8
 
     def _unpack(self):
         return self.struct.unpack(self.buffer)
@@ -402,10 +399,11 @@ class VRingUsedElement(object):
 
 
 class VRingUsed(object):
-    data_format = 'H H {:d}x'
+    data_format = 'H H'
 
     def __init__(self, buffer, size):
         self.buffer = buffer
+        self.self_buffer = buffer[:4]
         self.size = size
         used_elem_size = VRingUsedElement.byte_size()
         self.struct = Struct(VRingUsed.data_format.format(used_elem_size*size))
@@ -418,7 +416,7 @@ class VRingUsed(object):
 
     @flags.setter
     def flags(self, flags):
-        self._pack_into_buffer(flags, 'H')
+        pack_into('H', self.buffer, 0, flags)
 
     @property
     def index(self):
@@ -426,7 +424,8 @@ class VRingUsed(object):
 
     @index.setter
     def index(self, index):
-        self._pack_into_buffer(index, 'H', 'H')
+        # H ==> 2
+        pack_into('H', self.buffer, 2, index)
 
     def _pack_into_buffer(self, value, field_format, prefix=''):
         offset = calcsize(prefix)
@@ -436,8 +435,9 @@ class VRingUsed(object):
         return 'size={} buffer_size={} format={}'.format(self.size, len(self.buffer), self.struct.format)
 
     def _unpack(self):
-        return self.struct.unpack(self.buffer)
+        return self.struct.unpack(self.self_buffer)
 
     @staticmethod
     def byte_size(queue_size):
-        return calcsize(VRingUsed.data_format.format(VRingUsedElement.byte_size()*queue_size))
+        # H H (used elements interpreted as padding bytes)
+        return 4 + VRingUsedElement.byte_size() * queue_size

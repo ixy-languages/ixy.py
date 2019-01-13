@@ -51,7 +51,7 @@ class Register(object):
             raise AttributeError('No attribute {} found'.format(name))
 
 
-class VirtioRegister(Register):
+class VirtioRegister(object):
     def __init__(self, fd):
         self.fd = fd
 
@@ -62,10 +62,50 @@ class VirtioRegister(Register):
     def get(self, offset, length=1):
         return int.from_bytes(pread(self.fd.fileno(), length, offset), 'little')
 
+    def wait_set(self, reg, mask, length=1):
+        """
+        Args:
+            reg: register offset
+            mask: bitmask to be set
+            length: length in bytes of the mask
+        """
+        current = self.get(reg, length)
+        while (current & mask) != mask:
+            time.sleep(0.01)
+            current = self.get(reg, length)
+
+    def get8(self, offset):
+        return self.get(offset)
+
+    def get16(self, offset):
+        return self.get(offset, 2)
+
+    def get32(self, offset):
+        return self.get(offset, 4)
+
+    def set8(self, offset, value):
+        self.set(offset, value)
+
+    def set16(self, offset, value):
+        self.set(offset, value, 2)
+
+    def set32(self, offset, value):
+        self.set(offset, value, 4)
+
+    def wait_set8(self, reg, mask):
+        self.wait_set(reg, mask)
+
+    def wait_set16(self, reg, mask):
+        self.wait_set(reg, mask, 2)
+
+    def wait_set32(self, reg, mask):
+        self.wait_set(reg, mask, 4)
+
 
 class MmapRegister(object):
-    def __init__(self, mem_buffer):
-        self.mem_buffer = mem_buffer
+    def __init__(self, mm):
+        self.mm = mm
+        self.mem_buffer = memoryview(mm)
 
     def set(self, offset, value):
         pack_into('I', self.mem_buffer, offset, value & 0xFFFFFFFF)
@@ -94,3 +134,8 @@ class MmapRegister(object):
         while (current & mask) != mask:
             time.sleep(0.01)
             current = self.get(offset)
+
+    def dump(self):
+        with open('registers', 'wb') as f:
+            f.write(self.mem_buffer)
+
