@@ -78,10 +78,6 @@ class VirtioLegacyDevice(IxyDevice):
             self.rx_pkt_count += 1
             if desc.flags != types.VRING_DESC_F_WRITE:
                 log.error("Unsupported rx flags on descriptor: %x", desc.flags)
-                with open('log.txt', 'a+') as f:
-                    f.write('{:d}\n'.format(self.rx_pkt_count))
-                # desc.dump()
-                vq.buffers[used_element.id].dump()
             desc.reset()
             buf = vq.buffers[used_element_id]
             buffs.append(buf)
