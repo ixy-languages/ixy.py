@@ -398,14 +398,20 @@ class IxgbeDevice(IxyDevice):
             queue.index = next_index
             # NIC reads from here
             # Alaways the same flags: One buffer (EOP), advanced data descriptor, CRC offload, data length
-            buff_size = buff.size
+            # buff_size = buff.size
+            """
+            Unpacking the whole structure is faster than one by one
+            even though the mempool id is just ignored
+            """
+            _, data_addr, _, buff_size = buff.unpack()
             """
             No fancy offloading - only the total payload length
             implement offloading flags here:
                 * ip checksum offloading is trivial: just set the offset
                 * tcp/udp checksum offloading is more annoying, you have to precalculate the pseudo-header checksum
+            Packing at once is much more efficient, using the Struct object with cached data format
             """
-            descriptor.read.pack(buff.data_addr, self.cmd_type_flags | buff_size, buff_size << types.IXGBE_ADVTXD_PAYLEN_SHIFT)
+            descriptor.read.pack(data_addr, self.cmd_type_flags | buff_size, buff_size << types.IXGBE_ADVTXD_PAYLEN_SHIFT)
             current_index = next_index
             sent += 1
         # Send out by advancing tail, i.e. pass control of the bus to the NIC

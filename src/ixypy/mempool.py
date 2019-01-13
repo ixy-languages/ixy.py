@@ -82,12 +82,6 @@ class Mempool(object):
     def free_buffer(self, buff):
         self._buffers.push(buff)
     
-    def dump(self):
-        with open('buffers_{:d}.txt'.format(self.identifier), 'w+') as f:
-            for i, b in enumerate(self._buffers.items):
-                f.write('{:d}   {}\n'.format(i, b))
-            f.write('TOP = ' + str(self._buffers.top) + '\n')
-
     @staticmethod
     def add_pool(mempool):
         mempool.id = Mempool.get_identifier()
@@ -148,6 +142,17 @@ class PacketBuffer(object):
     def size(self, size):
         # offset: Q 8x I => 20
         pack_into('I', self.buffer, 20, size)
+
+    def unpack(self):
+        """
+        Unpacking the whole structure is faster than one by one
+        physical address
+        data address
+        memory pool id
+        size
+        """
+        unpacked = self.struct.unpack_from(self.buffer)
+        return unpacked[0], unpacked[0] + self.data_offset, unpacked[1], unpacked[2]
 
     @property
     def data_addr(self):
