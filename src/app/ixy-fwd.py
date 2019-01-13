@@ -13,7 +13,7 @@ log.basicConfig(level=log.DEBUG,
                 datefmt='%a, %d %b %Y %H:%M:%S')
 
 
-BATCH_SIZE = 40 
+BATCH_SIZE = 32 
 
 
 def forward(rx_dev, rx_queue, tx_dev, tx_queue):

@@ -257,6 +257,7 @@ class IxgbeDevice(IxyDevice):
         ]
         self._enable_dma()
 
+
     def rx_batch(self, queue_id, buffer_count):
         """
         Sec 1.8.2 and 7.1
@@ -388,7 +389,6 @@ class IxgbeDevice(IxyDevice):
         sent = 0
         for buff in buffers:
             descriptor = queue.descriptors[current_index]
-            # next_index = next(buffer_ring)
             next_index = wrap_ring(current_index, queue_len)
             # We are full if the next index is the one we are trying to reclaim
             if queue.clean_index == next_index:
