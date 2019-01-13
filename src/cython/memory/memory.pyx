@@ -38,61 +38,64 @@ cdef extern from "sys/mman.h":
         MAP_SHARED
         MAP_HUGETLB
 
+
 cdef class DmaMemory:
-  cdef void* virtual_address
-  cdef readonly uintptr_t physical_address
-  cdef Py_ssize_t size
-  cdef Py_ssize_t shape[1]
-  cdef Py_ssize_t strides[1]
+    cdef void* virtual_address
+    cdef readonly uintptr_t physical_address
+    cdef Py_ssize_t size
+    cdef Py_ssize_t shape[1]
+    cdef Py_ssize_t strides[1]
 
-  def __cinit__(self, uint32_t size, bint aligned=True):
-    self.size = <Py_ssize_t>size
-    self.shape[0] = self.size
-    self.strides[0] = 1
-    actual_size = DmaMemory._round_size(size)
-    if aligned and actual_size > HUGE_PAGE_SIZE:
-      raise MemoryError()
-    global huge_pg_id
-    # This is atomic thanks to the GIL
-    huge_pg_id += 1
-    page_id = huge_pg_id
-    path = "/mnt/huge/ixypy-{:d}-{:d}".format(page_id, os.getpid())
-    fd = os.open(path, os.O_CREAT | os.O_RDWR, stat.S_IRWXU)
-    # check error
-    self.virtual_address = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_HUGETLB, fd, 0)
-    memset(self.virtual_address, 0xab, self.size)
-    os.close(fd)
-    os.unlink(path)
-    self.physical_address = virt_to_phys(self.virtual_address)
+    def __cinit__(self, uint32_t size, bint aligned=True):
+        self.size = <Py_ssize_t>size
+        self.shape[0] = self.size
+        self.strides[0] = 1
+        actual_size = DmaMemory._round_size(size)
+        if aligned and actual_size > HUGE_PAGE_SIZE:
+          raise MemoryError()
+        global huge_pg_id
+        # This is atomic thanks to the GIL
+        huge_pg_id += 1
+        page_id = huge_pg_id
+        path = "/mnt/huge/ixypy-{:d}-{:d}".format(page_id, os.getpid())
+        fd = os.open(path, os.O_CREAT | os.O_RDWR, stat.S_IRWXU)
+        # check error
+        self.virtual_address = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_HUGETLB, fd, 0)
+        memset(self.virtual_address, 0xab, self.size)
+        os.close(fd)
+        os.unlink(path)
+        self.physical_address = virt_to_phys(self.virtual_address)
 
-  def __getbuffer__(self, Py_buffer *buffer, int flags):
-    cdef Py_ssize_t itemsize = 1
-    buffer.buf = <char *>self.virtual_address
-    buffer.format = 'B'
-    buffer.internal = NULL
-    buffer.itemsize = itemsize
-    buffer.len = self.size
-    buffer.ndim = 1
-    buffer.obj = self
-    buffer.readonly = 0
-    buffer.shape = self.shape
-    buffer.strides = self.strides
-    buffer.suboffsets = NULL
+    def __getbuffer__(self, Py_buffer *buffer, int flags):
+        cdef Py_ssize_t itemsize = 1
+        buffer.buf = <char *>self.virtual_address
+        buffer.format = 'B'
+        buffer.internal = NULL
+        buffer.itemsize = itemsize
+        buffer.len = self.size
+        buffer.ndim = 1
+        buffer.obj = self
+        buffer.readonly = 0
+        buffer.shape = self.shape
+        buffer.strides = self.strides
+        buffer.suboffsets = NULL
 
-  def get_physical_address(self, uint64_t offset):
-    return virt_to_phys(self.virtual_address + offset)
+    def get_physical_address(self, uint64_t offset):
+        return virt_to_phys(self.virtual_address + offset)
 
-  def __str__(self):
-    return 'DmaMemory(vaddr=0x{:02X}, phyaddr=0x{:02X}, size={:d})'.format(<uintptr_t>self.virtual_address, self.physical_address, self.size)
+    def __str__(self):
+        return 'DmaMemory(vaddr=0x{:02X}, phyaddr=0x{:02X}, size={:d})'.format(<uintptr_t>self.virtual_address, 
+                                                                               self.physical_address, 
+                                                                               self.size)
 
-  @staticmethod
-  cdef uint32_t _round_size(uint32_t size):
-    """
-    round up to multiples of 2 MB if necessary, this is the wasteful part
-    """
-    if size % HUGE_PAGE_SIZE != 0:
-      return ((size >> HUGE_PAGE_BITS) + 1) << HUGE_PAGE_BITS
-    return size
+    @staticmethod
+    cdef uint32_t _round_size(uint32_t size):
+        """
+        round up to multiples of 2 MB if necessary, this is the wasteful part
+        """
+        if size % HUGE_PAGE_SIZE != 0:
+          return ((size >> HUGE_PAGE_BITS) + 1) << HUGE_PAGE_BITS
+        return size
 
 
 cpdef wrap_ring(uint16_t index, uint16_t ring_size):
