@@ -95,5 +95,5 @@ cdef class DmaMemory:
     return size
 
 
-def wrap_ring(uint16_t index, uint16_t ring_size):
+cpdef wrap_ring(uint16_t index, uint16_t ring_size):
     return <uint16_t>(index + 1) & (ring_size - 1)

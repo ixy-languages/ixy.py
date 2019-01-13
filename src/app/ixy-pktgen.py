@@ -8,9 +8,8 @@ import logging as log
 import struct
 import time
 
-log.basicConfig(level=log.DEBUG,
-                format='%(filename)s:%(funcName)s:%(lineno)d %(levelname)-15s %(message)s',
-                datefmt='%a, %d %b %Y %H:%M:%S')
+
+log.basicConfig(level=log.DEBUG, format='%(levelname)-8s %(filename)s:%(lineno)s %(message)s')
 
 
 PKT_SIZE = 60

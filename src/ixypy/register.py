@@ -50,8 +50,7 @@ class Register(object):
         else:
             raise AttributeError('No attribute {} found'.format(name))
 
-
-class VirtioRegister(object):
+class FileRegister(object):
     def __init__(self, fd):
         self.fd = fd
 

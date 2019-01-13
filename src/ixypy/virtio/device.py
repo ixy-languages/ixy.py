@@ -8,7 +8,7 @@ from ixypy.mempool import Mempool
 from ixypy.virtio.structures import VRing, VQueue, VirtioNetworkControl, PromiscuousModeCommand, VirtioNetworkHeader
 from ixypy.ixy import IxyDevice
 from ixypy.virtio import types
-from ixypy.register import VirtioRegister
+from ixypy.register import FileRegister
 from ixypy.virtio.exception import VirtioException
 
 
@@ -31,7 +31,7 @@ class VirtioLegacyDevice(IxyDevice):
         log.debug('Configuring bar0')
         self.ctrl_queues = []
         self.resource, self.resource_size = self.pci_device.resource()
-        self.reg = VirtioRegister(self.resource)
+        self.reg = FileRegister(self.resource)
         self._reset_devices()
         self._ack_device()
         self._drive_device()

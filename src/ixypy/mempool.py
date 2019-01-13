@@ -35,7 +35,7 @@ class Mempool(object):
         self.dma = dma
         self.mem = memoryview(self.dma)
         for i, _ in enumerate(self.mem):
-            self.mem[i] = 0x00
+            self.mem[i] = 0x0
         self.buffer_size = buffer_size
         self.num_entries = num_entries
         self.identifier = None

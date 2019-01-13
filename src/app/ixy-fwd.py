@@ -8,9 +8,8 @@ import argparse
 import logging as log
 import time
 
-log.basicConfig(level=log.DEBUG,
-                format='%(asctime)s %(levelname)-8s %(message)s',
-                datefmt='%a, %d %b %Y %H:%M:%S')
+
+log.basicConfig(level=log.DEBUG, format='%(levelname)-8s %(filename)s:%(lineno)s %(message)s')
 
 
 BATCH_SIZE = 32 
@@ -23,7 +22,7 @@ def forward(rx_dev, rx_queue, tx_dev, tx_queue):
     if rx_buffers:
         for buff in rx_buffers:
             buff.touch()
-
+        
         tx_buffer_count = tx_dev.tx_batch(rx_buffers, tx_queue)
 
         """
