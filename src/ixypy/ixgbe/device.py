@@ -2,12 +2,18 @@ import time
 import logging as log
 from functools import reduce
 
-from memory import DmaMemory, wrap_ring
+from memory import DmaMemory 
 from ixypy.mempool import Mempool
 from ixypy.ixgbe.structures import RxQueue, TxQueue
 from ixypy.ixy import IxyDevice
 from ixypy.register import MmapRegister
 from ixypy.ixgbe import types
+from ixypy.utils import dump
+
+
+
+def wrap_ring(index, ring_size):
+    return (index + 1) & (ring_size - 1)
 
 
 def ring(start, size):
@@ -15,6 +21,7 @@ def ring(start, size):
     while True:
         yield current
         current = wrap_ring(current, size)
+
 
 
 class IxgbeDevice(IxyDevice):
@@ -134,6 +141,8 @@ class IxgbeDevice(IxyDevice):
 
         # was set to 0 before in the init function
         self.reg.set(types.IXGBE_RDT(queue.identifier), len(queue) - 1)
+        self.reg.set(types.IXGBE_RDT(queue.identifier), len(queue) - 1)
+        self.reg.wait_set(types.IXGBE_RDT(queue.identifier), len(queue) - 1)
 
     def _init_rx(self):
         """Sec 4.6.7"""
@@ -265,8 +274,8 @@ class IxgbeDevice(IxyDevice):
         see datashet section 7.1.9 for an explanation of the rx ring structure
         tl;dr; we control the tail of the queue, the hardware the head
         """
-        if not 0 <= queue_id < len(self.rx_queues):
-            raise IndexError('Queue id<{}> not in [0, {}]'.format(queue_id, len(self.rx_queues)))
+        # if not 0 <= queue_id < len(self.rx_queues):
+            # raise IndexError('Queue id<{}> not in [0, {}]'.format(queue_id, len(self.rx_queues)))
         buffers = []
         queue = self.rx_queues[queue_id]
         queue_length = len(queue)
@@ -398,14 +407,20 @@ class IxgbeDevice(IxyDevice):
             queue.index = next_index
             # NIC reads from here
             # Alaways the same flags: One buffer (EOP), advanced data descriptor, CRC offload, data length
-            buff_size = buff.size
+            # buff_size = buff.size
+            """
+            Unpacking the whole structure is faster than one by one
+            even though the mempool id is just ignored
+            """
+            _, data_addr, _, buff_size = buff.unpack()
             """
             No fancy offloading - only the total payload length
             implement offloading flags here:
                 * ip checksum offloading is trivial: just set the offset
                 * tcp/udp checksum offloading is more annoying, you have to precalculate the pseudo-header checksum
+            Packing at once is much more efficient, using the Struct object with cached data format
             """
-            descriptor.read.pack(buff.data_addr, self.cmd_type_flags | buff_size, buff_size << types.IXGBE_ADVTXD_PAYLEN_SHIFT)
+            descriptor.read.pack(data_addr, self.cmd_type_flags | buff_size, buff_size << types.IXGBE_ADVTXD_PAYLEN_SHIFT)
             current_index = next_index
             sent += 1
         # Send out by advancing tail, i.e. pass control of the bus to the NIC
