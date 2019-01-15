@@ -12,17 +12,18 @@ import time
 log.basicConfig(level=log.DEBUG, format='%(levelname)-8s %(filename)s:%(lineno)s %(message)s')
 
 
-BATCH_SIZE = 32 
+BATCH_SIZE = 128
 
 
 def forward(rx_dev, rx_queue, tx_dev, tx_queue):
+    global pkt_count
     rx_buffers = rx_dev.rx_batch(rx_queue, BATCH_SIZE)
 
     mempool = None
     if rx_buffers:
         for buff in rx_buffers:
             buff.touch()
-        
+
         tx_buffer_count = tx_dev.tx_batch(rx_buffers, tx_queue)
 
         """

@@ -1,6 +1,8 @@
 from struct import Struct, calcsize, pack_into, unpack_from
 from ixypy.ixy import IxyQueue
 
+import numpy as np
+
 
 class IxgbeQueue(IxyQueue):
     def __init__(self, memory, size, identifier, mempool=None):
@@ -12,16 +14,46 @@ class IxgbeQueue(IxyQueue):
 
 
 class RxQueue(IxgbeQueue):
+    read = np.dtype([
+        ('pkt_addr', np.uint64),
+        ('hdr_addr', np.uint64)
+    ])
+    wb = np.dtype([
+        ('lower', [
+            ('lo_dword', np.uint32),
+            ('hi_dword', np.uint32)
+        ]),
+        ('upper', [
+            ('status_error', np.uint32),
+            ('length', np.uint16),
+            ('vlan', np.uint16)           
+        ])
+    ])
+
     def __init__(self, memory, size, identifier, mempool):
         super().__init__(memory, size, identifier, mempool)
         self.descriptors = self._get_descriptors(RxDescriptor)
+        self.dsc_read = np.frombuffer(memory, dtype=self.read)
+        self.dsc_wb = np.frombuffer(memory, dtype=self.wb)
 
 
 class TxQueue(IxgbeQueue):
+    read = np.dtype([
+        ('buffer_address', np.uint64),
+        ('cmd_type_len', np.uint32),
+        ('olinfo_status', np.uint32)])
+
+    wb = np.dtype([
+        ('rsvd', np.uint64),
+        ('nxtse_seed', np.uint32),
+        ('status', np.uint32)])
+
     def __init__(self, memory, size, identifier):
         super().__init__(memory, size, identifier)
         self.clean_index = 0
         self.descriptors = self._get_descriptors(TxDescriptor)
+        self.dsc_read = np.frombuffer(memory, dtype=self.read)
+        self.dsc_wb = np.frombuffer(memory, dtype=self.wb)
 
 
 class IxgbeStruct(object):

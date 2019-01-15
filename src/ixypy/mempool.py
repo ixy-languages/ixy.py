@@ -60,9 +60,12 @@ class Mempool(object):
         for i in range(self.num_entries):
             offset = i*self.buffer_size
             buff = PacketBuffer(self.mem[offset:offset + self.buffer_size])
-            buff.mempool_id = self.identifier
-            buff.physical_address = base_phy_address + offset
-            buff.size = 0
+            buff.pkt_buf[2] = self.identifier
+            buff.pkt_buf[0] = base_phy_address + offset
+            buff.pkt_buf[3] = 0
+            # buff.mempool_id = self.identifier
+            # buff.physical_address = base_phy_address + offset
+            # buff.size = 0
             yield buff
 
     def preallocate_buffers(self):
@@ -102,18 +105,28 @@ class Mempool(object):
         mempool.preallocate_buffers()
         return mempool
 
-
+import numpy as np
 class PacketBuffer(object):
     data_format = 'Q 8x I I 40x'
     data_offset = calcsize(data_format)
     head_room_offset = calcsize('Q 8x I I')
     struct = Struct(data_format)
-
+    
     def __init__(self, buffer):
         self.buffer = buffer
         self.data_buffer = buffer[self.struct.size:]
         # data: Q 8x I I ==> 24
         self.head_room_buffer = buffer[self.head_room_offset:self.struct.size]
+        self.dt = np.dtype([
+            ('physical_addr', np.uint64),
+            ('mempool', np.uint64),
+            ('mempool_id', np.uint32),
+            ('size', np.uint32),
+            ('head_room', np.uint8, 40),
+            ('data', np.uint8, len(buffer) - 64)
+        ])
+        self.pkt_buf = np.frombuffer(buffer, dtype=self.dt)[0]
+
 
     @property
     def physical_address(self):
@@ -156,7 +169,8 @@ class PacketBuffer(object):
 
     @property
     def data_addr(self):
-        return self.physical_address + self.data_offset
+        # return self.physical_address + self.data_offset
+        return self.pkt_buf[0] + self.data_offset
 
     def touch(self):
         current_val = self.buffer[48]

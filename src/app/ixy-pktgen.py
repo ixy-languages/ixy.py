@@ -13,7 +13,8 @@ log.basicConfig(level=log.DEBUG, format='%(levelname)-8s %(filename)s:%(lineno)s
 
 
 PKT_SIZE = 60
-BATCH_SIZE = 64 
+BATCH_SIZE = 32
+
 
 pkt_data = bytearray([
     # dst MAC
