@@ -65,4 +65,4 @@ ENV/
 env.bak/
 venv.bak/
 
-*.html
+.DS_Store

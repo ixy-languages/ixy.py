@@ -32,7 +32,7 @@ setup(
         "License :: OSI Approved :: BSD License",
     ],
     include_package_data=True,
-    install_requires=[],
+    install_requires=['numpy==1.15.4'],
     setup_requires=[],
     packages=find_packages('src'),
     package_dir={'': 'src'},

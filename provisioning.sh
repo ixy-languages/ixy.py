@@ -12,7 +12,7 @@ apt-get install -q -y wget curl llvm libncurses5-dev libncursesw5-dev xz-utils t
 
 
 # Install Python 3
-PYTHON_VERSION=3.6.7
+PYTHON_VERSION=3.7.2
 PYTHON_DIR="Python-$PYTHON_VERSION"
 echo "Python $PYTHON_VERSION installation ============>"
 wget "https://www.python.org/ftp/python/$PYTHON_VERSION/$PYTHON_DIR.tgz"
@@ -28,7 +28,7 @@ rm -fr $PYTHON_DIR
 
 echo "pip installation ============>"
 wget https://bootstrap.pypa.io/get-pip.py
-python3.6 get-pip.py
+python3.7 get-pip.py
 rm -f get-pip.py
 
 

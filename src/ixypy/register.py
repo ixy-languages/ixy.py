@@ -2,6 +2,7 @@ import re
 import time
 from os import pwrite, pread
 from struct import pack_into, unpack_from
+import numpy as np
 
 
 class Register(object):
@@ -105,9 +106,10 @@ class MmapRegister(object):
     def __init__(self, mm):
         self.mm = mm
         self.mem_buffer = memoryview(mm)
+        self.reg_vals = np.frombuffer(self.mem_buffer, dtype=np.uint32)
 
     def set(self, offset, value):
-        pack_into('I', self.mem_buffer, offset, value & 0xFFFFFFFF)
+        self.reg_vals[offset//4] = value
 
     def set_flags(self, offset, flags):
         new_value = self.get(offset) | flags
@@ -117,7 +119,7 @@ class MmapRegister(object):
         self.set(offset, self.get(offset) & ~flags)
 
     def get(self, offset):
-        return unpack_from('I', self.mem_buffer, offset)[0]
+        return self.reg_vals[offset//4]
 
     def print_reg(self, offset):
         print('{:02x}'.format(self.get(offset)))
