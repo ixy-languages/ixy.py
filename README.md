@@ -7,9 +7,6 @@ ixy.py is a Python rewrite of the [ixy](https://github.com/emmericp/ixy) userspa
 It is designed to be readable, idiomatic Python code.
 It supports Intel 82599 10GbE (`ixgbe` family) and Virtio NICs.
 
-## Features
-* Simplicity
-* 2.7K LOCs of Python/Cython
 
 ## Build instructions
 Install python3.6 or higher.
@@ -73,5 +70,5 @@ ixypy is not production-ready. Do not use it in critical environments. DMA may c
 Check out the [other ixy implementations](https://github.com/ixy-languages)
 
 ## Profiling
+![DotGraph](docs/profiling/cprof.svg?sanitize=true)
 ![Flamegraph](docs/profiling/flamegraph.svg?sanitize=true)
-![Snakeviz](docs/profiling/snakeviz.htm)
