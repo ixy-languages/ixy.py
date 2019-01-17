@@ -121,9 +121,6 @@ class MmapRegister(object):
     def get(self, offset):
         return self.reg_vals[offset//4]
 
-    def print_reg(self, offset):
-        print('{:02x}'.format(self.get(offset)))
-
     def wait_clear(self, offset, mask):
         current = self.get(offset)
         while (current & mask) != 0:
@@ -135,8 +132,4 @@ class MmapRegister(object):
         while (current & mask) != mask:
             time.sleep(0.01)
             current = self.get(offset)
-
-    def dump(self):
-        with open('registers', 'wb') as f:
-            f.write(self.mem_buffer)
 

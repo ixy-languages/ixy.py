@@ -22,7 +22,7 @@ rm "$PYTHON_DIR.tgz"
 cd $PYTHON_DIR
 ./configure --enable-optimizations
 make -j8
-make altinstall
+sudo make altinstall
 cd ..
 rm -fr $PYTHON_DIR
 ```
@@ -52,6 +52,11 @@ pip install -r <path-to-project-directory>/requirements-dev.txt
 Install __ixypy__
 ``` bash
 pip install <path-to-project-directory>
+```
+
+Enable hugepages
+``` bash
+sudo ./setup-hugetables.sh
 ```
 
 Run one of the sample applications in the following way:

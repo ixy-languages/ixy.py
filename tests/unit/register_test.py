@@ -92,9 +92,9 @@ def test_set_flags(tmpdir):
     # given
     mem, fd = get_mem(tmpdir)
     reg = MmapRegister(mem)
-    already_set = 0xAAAABBBB
-    pack_into('I', mem, 10, already_set)
-    offset = 10
+    already_set = 0xAAAA0000
+    offset = 8
+    pack_into('I', mem, offset, already_set)
 
     # when
     reg.set_flags(offset, 0x0000FFFF)
