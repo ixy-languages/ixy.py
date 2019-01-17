@@ -70,5 +70,10 @@ ixypy is not production-ready. Do not use it in critical environments. DMA may c
 Check out the [other ixy implementations](https://github.com/ixy-languages)
 
 ## Profiling
-![DotGraph](docs/profiling/cprof.svg?sanitize=true)
-![Flamegraph](docs/profiling/flamegraph.svg?sanitize=true)
+### cProfile
+![cProfile](docs/profiling/cprof.svg)
+
+### Pystats
+![Flamegraph](docs/profiling/flamegraph.svg)
+### Linux perf
+![FlameGraph](docs/profiling/perf-ixy.svg)
