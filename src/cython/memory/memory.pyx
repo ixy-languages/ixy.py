@@ -17,17 +17,17 @@ DEF SIZE_PKT_BUF_HEADROOM = 40
 cdef uint32_t huge_pg_id = 0
 
 cdef uintptr_t virt_to_phys(void* virt):
-  cdef long pagesize = <long>resource.getpagesize()
-  # check error
-  fd = os.open("/proc/self/pagemap", os.O_RDONLY)
+    cdef long pagesize = <long>resource.getpagesize()
+    # check error
+    fd = os.open("/proc/self/pagemap", os.O_RDONLY)
 
-  cdef uintptr_t offset = <uintptr_t> virt / pagesize * sizeof(uintptr_t)
-  # check error
-  os.lseek(fd, offset, os.SEEK_SET)
-  # check error
-  cdef uintptr_t phy = <uintptr_t>(array.array('Q', os.read(fd, sizeof(phy)))[0])
-  os.close(fd)
-  return (phy & 0x7fffffffffffffULL) * pagesize + (<uintptr_t>virt) % pagesize
+    cdef uintptr_t offset = <uintptr_t> virt / pagesize * sizeof(uintptr_t)
+    # check error
+    os.lseek(fd, offset, os.SEEK_SET)
+    # check error
+    cdef uintptr_t phy = <uintptr_t>(array.array('Q', os.read(fd, sizeof(phy)))[0])
+    os.close(fd)
+    return (phy & 0x7fffffffffffffULL) * pagesize + (<uintptr_t>virt) % pagesize
 
 
 cdef extern from "sys/mman.h":
